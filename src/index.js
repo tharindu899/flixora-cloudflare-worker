@@ -15,8 +15,8 @@
 
 import { UI_HTML } from "./ui.js";
 import { loginHtml } from "./login.js";
-import { authConfigured, checkLogin, isAuthed, sessionCookie, clearCookie } from "./auth.js";
-import { applyEvent, snapshot, uaLabel, memEntries, memDays, memErrs, addDaily, noteError, statsView } from "./log.js";
+import { authConfigured, checkLogin, isAuthed, sessionCookie, clearCookie, lockStatus, lockFail, lockClear, memLocks } from "./auth.js";
+import { applyEvent, snapshot, uaLabel, memEntries, memDays, memErrs, memUsage, addDaily, noteError, noteUsage, statsView, abuseLimitBytes, heavyClients, gateDecision, addDenied } from "./log.js";
 import { alertConfig, pingBackends, sendTelegram, telegramReady } from "./alerts.js";
 
 export { LogHub } from "./log.js";
@@ -140,16 +140,17 @@ async function verifyDownloadToken(secret, fileId, token) {
 
 const statsOffset = (env) => (Number.isFinite(Number(env.STATS_TZ_MIN)) && env.STATS_TZ_MIN !== "" && env.STATS_TZ_MIN != null ? Number(env.STATS_TZ_MIN) : 330);
 
-async function makeLogCtx(request, parsed) {
+async function clientHash(request) {
   const ip = request.headers.get("cf-connecting-ip") || "";
-  let client = "local";
-  if (ip) {
-    try {
-      client = hex(await crypto.subtle.digest("SHA-256", TEXT.encode(ip))).slice(0, 6);
-    } catch (_) {
-      client = "anon";
-    }
+  if (!ip) return "local";
+  try {
+    return hex(await crypto.subtle.digest("SHA-256", TEXT.encode(ip))).slice(0, 6);
+  } catch (_) {
+    return "anon";
   }
+}
+
+async function makeLogCtx(request, parsed, client) {
   const kind = parsed.isDownload ? "download" : "play";
   return {
     kind,
@@ -342,7 +343,7 @@ function downloadDisposition(meta, parsed) {
 
 // ---------------------------------------------------------------- main serve
 
-async function serve(request, ctx, c, parsed, reqUrl, env) {
+async function serve(request, ctx, c, parsed, reqUrl, env, client) {
   const cache = caches.default;
   const base = reqUrl.origin;
   const budget = { left: SUBREQUEST_BUDGET - (env.LOGS ? LOG_RESERVE : 0), logLeft: LOG_RESERVE };
@@ -568,7 +569,7 @@ async function serve(request, ctx, c, parsed, reqUrl, env) {
 
   // ---- activity log (best effort - never blocks or breaks the stream)
   const t0 = Date.now();
-  const logCtx = await makeLogCtx(request, parsed);
+  const logCtx = await makeLogCtx(request, parsed, client);
   const rid = Math.random().toString(36).slice(2, 8);
   const send = (ev, final) => {
     ev.sid = logCtx.sid;
@@ -579,6 +580,8 @@ async function serve(request, ctx, c, parsed, reqUrl, env) {
         applyEvent(memEntries, ev, now);
         addDaily(memDays, ev, now, statsOffset(env));
         noteError(memErrs, ev, now);
+        const warn = noteUsage(memUsage, ev, now, abuseLimitBytes(env));
+        if (warn) ctx.waitUntil(sendTelegram(env, warn));
         return;
       }
       if (budget.logLeft < (final ? 1 : 2)) return; // always keep one call for the final event
@@ -683,6 +686,53 @@ async function serve(request, ctx, c, parsed, reqUrl, env) {
   return new Response(readable, { status: partial ? 206 : 200, headers });
 }
 
+// ---------------------------------------------------------------- per-client limits
+
+const intVar = (v, d) => (v === undefined || v === null || v === "" || !Number.isFinite(Number(v)) ? d : Math.max(0, Math.floor(Number(v))));
+const limitsOf = (env) => ({ maxReqs: intVar(env.MAX_CLIENT_REQS, 24), maxFiles: intVar(env.MAX_CLIENT_FILES, 6) });
+
+/** 429 Response when this client is over its limits, else null. Fails open (never blocks on a DO problem). */
+async function clientGate(env, c, parsed, client) {
+  const { maxReqs, maxFiles } = limitsOf(env);
+  if (!maxReqs && !maxFiles) return null;
+  const kind = parsed.isDownload ? "download" : "play";
+  const body = { client, sid: `${parsed.id}|${kind}|${client}`, maxReqs, maxFiles };
+  let r;
+  try {
+    if (env.LOGS) {
+      const stub = env.LOGS.get(env.LOGS.idFromName("main"));
+      const resp = await Promise.race([stub.fetch("https://log/gate", { method: "POST", body: JSON.stringify(body) }), sleep(1500).then(() => null)]);
+      r = resp ? await resp.json() : { ok: true };
+    } else {
+      const now = Date.now();
+      r = gateDecision(memEntries, body, now);
+      if (!r.ok) addDenied(memDays, now, statsOffset(env));
+    }
+  } catch (_) {
+    return null;
+  }
+  if (r.ok) return null;
+  const h = withCors(new Headers({ "Content-Type": "application/json; charset=utf-8", "Cache-Control": "no-store", "Retry-After": "5" }));
+  return new Response(JSON.stringify({ error: r.reason }), { status: 429, headers: h });
+}
+
+// ---------------------------------------------------------------- login lockout (DO when bound, else per-isolate memory)
+
+async function lockOp(env, op, key) {
+  try {
+    if (env.LOGS) {
+      const stub = env.LOGS.get(env.LOGS.idFromName("main"));
+      return await (await stub.fetch("https://log/lock", { method: "POST", body: JSON.stringify({ op, key }) })).json();
+    }
+  } catch (_) {
+    return { locked: false, retry: 0 };
+  }
+  const now = Date.now();
+  if (op === "check") return lockStatus(memLocks, key, now);
+  if (op === "clear") return void lockClear(memLocks, key) || { ok: true };
+  return lockFail(memLocks, key, now);
+}
+
 // ---------------------------------------------------------------- cache purge
 
 const PURGE_BATCH = 40; // cache.delete counts as a subrequest (Free: 50)
@@ -785,10 +835,22 @@ async function handle(request, env, ctx) {
     } catch (_) {
       return jsonError(400, "Bad request");
     }
+    const who = "login:" + (await clientHash(request));
+    const lock = await lockOp(env, "check", who);
+    if (lock.locked) {
+      const h = new Headers({ "Content-Type": "application/json; charset=utf-8", "Cache-Control": "no-store", "Retry-After": String(lock.retry) });
+      return new Response(JSON.stringify({ error: `Too many wrong passwords. Try again in ${Math.max(1, Math.ceil(lock.retry / 60))} min.` }), { status: 429, headers: h });
+    }
     if (!(await checkLogin(env, String(body?.user ?? ""), String(body?.pass ?? "")))) {
       await new Promise((r) => setTimeout(r, 700)); // slow down guessing
+      const f = await lockOp(env, "fail", who);
+      if (f.justLocked) {
+        const where = String(request.cf?.country || request.headers.get("cf-ipcountry") || "?");
+        ctx.waitUntil(sendTelegram(env, `🔒 Flixora UI: 5 wrong passwords from client #${who.slice(6)} (${where}). Login locked for 15 minutes.`));
+      }
       return jsonError(401, "Wrong username or password");
     }
+    await lockOp(env, "clear", who);
     return new Response(JSON.stringify({ ok: true }), {
       headers: { "Content-Type": "application/json", "Cache-Control": "no-store", "Set-Cookie": await sessionCookie(env, secure) },
     });
@@ -874,12 +936,22 @@ async function handle(request, env, ctx) {
         alert_errors: cfg.errCount,
         alert_min_hit: cfg.minHit,
         blocked_countries: [...countrySet(env.BLOCK_COUNTRIES)],
+        abuse_gb: abuseLimitBytes(env) / 1073741824,
+        ...(() => {
+          const l = limitsOf(env);
+          return { max_reqs: l.maxReqs, max_files: l.maxFiles };
+        })(),
       });
     }
     if (url.pathname === "/stats.json") {
       try {
         if (stub) return plain({ mode: "durable", ...(await (await stub.fetch("https://log/stats")).json()) });
-        return plain({ mode: "memory", ...statsView(memDays, Date.now(), statsOffset(env)) });
+        return plain({
+          mode: "memory",
+          ...statsView(memDays, Date.now(), statsOffset(env)),
+          heavy: heavyClients(memUsage, memEntries, Date.now()),
+          abuse_gb: abuseLimitBytes(env) / 1073741824,
+        });
       } catch (_) {
         return jsonError(502, "Stats store unavailable");
       }
@@ -922,7 +994,12 @@ async function handle(request, env, ctx) {
     }
   }
 
-  return serve(request, ctx, c, parsed, url, env);
+  const client = await clientHash(request);
+  if (request.method === "GET") {
+    const denied = await clientGate(env, c, parsed, client);
+    if (denied) return denied;
+  }
+  return serve(request, ctx, c, parsed, url, env, client);
 }
 
 export default {

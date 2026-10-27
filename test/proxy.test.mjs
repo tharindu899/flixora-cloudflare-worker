@@ -529,3 +529,132 @@ test("BLOCK_COUNTRIES blocks proxy traffic but never the UI or login", async () 
   assert.equal((await call("/ui", { env, headers: { "cf-ipcountry": "CN" } })).res.status, 200);
   assert.equal((await login(env)).res.status, 200);
 });
+
+// ---------------------------------------------------------------- login lockout, heavy clients, per-client limits
+const { lockFail, lockStatus, lockClear, LOCK } = await import("../src/auth.js");
+const { noteUsage, heavyClients, gateDecision, clientActivity, memEntries: seededEntries } = await import("../src/log.js");
+
+test("lockout rules: 5 wrong passwords lock for 15 min, expire, and a good login clears the count", () => {
+  const locks = {};
+  const t = 1_000_000_000_000;
+  for (let i = 0; i < 4; i++) assert.equal(lockFail(locks, "a", t + i).locked, false);
+  const r = lockFail(locks, "a", t + 5);
+  assert.deepEqual([r.locked, r.justLocked, r.retry], [true, true, 900]);
+  assert.equal(lockFail(locks, "a", t + 6).justLocked, false); // already locked, no second alert
+  assert.equal(lockStatus(locks, "a", t + 5 + 60_000).retry, 840);
+  assert.equal(lockStatus(locks, "b", t).locked, false); // other clients unaffected
+  assert.equal(lockStatus(locks, "a", t + LOCK.lockMs + 10).locked, false); // expired
+  assert.equal(lockFail(locks, "a", t + LOCK.lockMs + 20).locked, false); // fresh count
+  lockClear(locks, "a");
+  assert.equal(locks.a, undefined);
+  // old failures outside the window do not add up
+  const l2 = {};
+  for (let i = 0; i < 4; i++) lockFail(l2, "c", t);
+  assert.equal(lockFail(l2, "c", t + LOCK.windowMs + 1).locked, false);
+});
+
+test("login endpoint locks a client after 5 wrong passwords, tells Telegram once, other clients still log in", async () => {
+  tgSent.length = 0;
+  const env = { ...LOGENV, TG_BOT_TOKEN: "tok", TG_CHAT_ID: "42" };
+  const attempt = (ip, pass) =>
+    call("/login", { env, method: "POST", headers: { "content-type": "application/json", "cf-connecting-ip": ip, "cf-ipcountry": "LK" }, payload: JSON.stringify({ user: "admin", pass }) });
+  for (let i = 0; i < 5; i++) assert.equal((await attempt("203.0.113.9", "wrong")).res.status, 401);
+  assert.equal(tgSent.length, 1);
+  assert.match(tgSent[0].text, /locked for 15 minutes/);
+  const blocked = await attempt("203.0.113.9", "s3cret pass"); // even the right password is refused while locked
+  assert.equal(blocked.res.status, 429);
+  assert.equal(blocked.res.headers.get("retry-after"), "900");
+  assert.match(jsonOf(blocked).error, /15 min/);
+  assert.equal((await attempt("203.0.113.10", "s3cret pass")).res.status, 200);
+  assert.equal(tgSent.length, 1);
+});
+
+test("heavy client: alert once per 6 h when one client pulls more than the hourly limit", () => {
+  const usage = {};
+  const GB = 1073741824;
+  const t = 1_000_000_000_000;
+  const ev = (sent, extra = {}) => ({ type: "end", sid: "f|download|ab12cd", sent, name: "big.mkv", ...extra });
+  assert.equal(noteUsage(usage, ev(10 * GB), t, 30 * GB), "");
+  assert.equal(noteUsage(usage, ev(15 * GB), t + 1000, 30 * GB), "");
+  const msg = noteUsage(usage, ev(8 * GB), t + 2000, 30 * GB);
+  assert.match(msg, /#ab12cd/);
+  assert.match(msg, /33\.0 GB/);
+  assert.match(msg, /big\.mkv/);
+  assert.equal(noteUsage(usage, ev(8 * GB), t + 3000, 30 * GB), ""); // cooldown
+  assert.equal(noteUsage({}, ev(900 * GB), t, 0), ""); // limit 0 = off
+  assert.equal(noteUsage(usage, { type: "progress", sid: "f|play|x", sent: 99 * GB }, t, 1), ""); // only finished requests count
+  const top = heavyClients(usage, [{ client: "ab12cd", country: "LK", dev: "VLC on Android" }], t + 4000);
+  assert.deepEqual([top[0].client, top[0].country, top[0].dev], ["ab12cd", "LK", "VLC on Android"]);
+  // a new hour starts a new count
+  assert.equal(noteUsage(usage, ev(5 * GB), t + 3601_000 + 5000, 30 * GB), "");
+  assert.equal(usage.ab12cd.b, 5 * GB);
+});
+
+test("Durable Object: real traffic over ABUSE_GB_PER_HOUR sends a Telegram alert and shows up under heavy clients", async () => {
+  resetAll();
+  tgSent.length = 0;
+  const kv = new Map();
+  const denv = { ABUSE_GB_PER_HOUR: "0.000001", TG_BOT_TOKEN: "tok", TG_CHAT_ID: "42" }; // ~1 KB
+  const hub = new LogHub(
+    { storage: { get: async (k) => kv.get(k), put: async (k, v) => kv.set(k, structuredClone(v)) }, blockConcurrencyWhile: (fn) => fn() },
+    denv
+  );
+  const LOGS = { idFromName: (n) => n, get: () => ({ fetch: (u, init) => hub.fetch(new Request(u, init)) }) };
+  const env = { ...LOGENV, LOGS };
+  await call(plain(), { env, headers: { Range: "bytes=0-1048575", "cf-connecting-ip": "198.51.100.7" } });
+  await call(plain(), { env, headers: { Range: "bytes=0-1048575", "cf-connecting-ip": "198.51.100.7" } });
+  assert.equal(tgSent.filter((m) => /Heavy client/.test(m.text)).length, 1);
+  const st = jsonOf(await call("/stats.json", { env, headers: { cookie: AUTH } }));
+  assert.equal(st.heavy.length, 1);
+  assert.ok(st.heavy[0].bytes >= 2 * MIB);
+  assert.equal(st.heavy[0].name, "movie.mkv");
+});
+
+test("per-client limits: pure decision rules", () => {
+  const t = Date.now();
+  const entries = [];
+  const start = (sid, rid, client) => applyEvent(entries, { sid, rid, type: "start", client, name: sid, kind: "play", total: 10 }, t);
+  start("a|play|c1", "r1", "c1");
+  start("a|play|c1", "r2", "c1");
+  start("b|play|c1", "r3", "c1");
+  start("z|play|c2", "r4", "c2");
+  assert.deepEqual(clientActivity(entries, "c1", t, "a|play|c1"), { reqs: 3, files: 2, sidActive: true });
+  assert.equal(gateDecision(entries, { client: "c1", sid: "new|play|c1", maxReqs: 3, maxFiles: 0 }, t).ok, false);
+  assert.equal(gateDecision(entries, { client: "c1", sid: "new|play|c1", maxReqs: 0, maxFiles: 2 }, t).ok, false);
+  assert.equal(gateDecision(entries, { client: "c1", sid: "a|play|c1", maxReqs: 0, maxFiles: 2 }, t).ok, true); // same file is fine
+  assert.equal(gateDecision(entries, { client: "c2", sid: "new|play|c2", maxReqs: 3, maxFiles: 2 }, t).ok, true); // other client unaffected
+  assert.equal(gateDecision(entries, { client: "c1", sid: "new|play|c1", maxReqs: 0, maxFiles: 0 }, t).ok, true); // 0 = off
+  // a request silent for 8+ minutes is treated as dead
+  assert.equal(clientActivity(entries, "c1", t + 9 * 60_000, "x").reqs, 0);
+});
+
+test("per-client limits: extra files / connections get 429 + Retry-After and are counted in the stats", async () => {
+  resetAll();
+  await call("/logs/clear", { env: LOGENV, method: "POST", headers: { cookie: AUTH } });
+  seededEntries.length = 0;
+  const now = Date.now();
+  // the test client has no cf-connecting-ip -> client id "local"
+  for (const [sid, rid] of [["f1|play|local", "r1"], ["f2|play|local", "r2"]]) {
+    applyEvent(seededEntries, { sid, rid, type: "start", client: "local", name: sid, kind: "play", total: 10 }, now);
+  }
+  const lim = { ...LOGENV, MAX_CLIENT_FILES: "2" };
+  const denied = await call(plain(), { env: lim, headers: { Range: "bytes=0-9" } });
+  assert.equal(denied.res.status, 429);
+  assert.equal(denied.res.headers.get("retry-after"), "5");
+  assert.match(jsonOf(denied).error, /Too many files/);
+  assert.equal(originCalls.length, 0, "nothing was fetched from the VPS");
+  // the same file again, with the limits off, or from another client are fine
+  assert.equal((await call(plain(), { env: { ...lim, MAX_CLIENT_FILES: "0" }, headers: { Range: "bytes=0-9" } })).res.status, 206);
+  assert.equal((await call(plain(), { env: lim, headers: { Range: "bytes=0-9", "cf-connecting-ip": "192.0.2.50" } })).res.status, 206);
+  const reqLim = { ...LOGENV, MAX_CLIENT_REQS: "2", MAX_CLIENT_FILES: "0" };
+  assert.equal((await call(plain(), { env: reqLim, headers: { Range: "bytes=0-9" } })).res.status, 429);
+  const st = jsonOf(await call("/stats.json", { env: LOGENV, headers: { cookie: AUTH } }));
+  assert.ok(st.days.find((d) => d.d === st.today).x >= 2);
+  seededEntries.length = 0;
+  assert.equal((await call(plain(), { env: reqLim, headers: { Range: "bytes=0-9" } })).res.status, 206);
+});
+
+test("status.json reports the limits", async () => {
+  const s = jsonOf(await call("/status.json", { env: { ...LOGENV, MAX_CLIENT_FILES: "3", ABUSE_GB_PER_HOUR: "12" }, headers: { cookie: AUTH } }));
+  assert.deepEqual([s.max_files, s.max_reqs, s.abuse_gb], [3, 24, 12]);
+});

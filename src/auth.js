@@ -54,3 +54,36 @@ export async function sessionCookie(env, secure) {
 }
 
 export const clearCookie = (secure) => `${COOKIE}=; Path=/; Max-Age=0; HttpOnly; SameSite=Strict${secure ? "; Secure" : ""}`;
+
+// ---------------------------------------------------------------- login lockout
+
+export const LOCK = { fails: 5, windowMs: 15 * 60 * 1000, lockMs: 15 * 60 * 1000 };
+export const memLocks = {};
+
+/** -> { locked, retry (seconds) } */
+export function lockStatus(locks, key, now) {
+  const e = locks[key];
+  if (e && e.until > now) return { locked: true, retry: Math.ceil((e.until - now) / 1000) };
+  return { locked: false, retry: 0 };
+}
+
+/** Records one wrong password. -> { locked, retry, justLocked } */
+export function lockFail(locks, key, now) {
+  for (const k of Object.keys(locks)) {
+    const e = locks[k];
+    if (e.until <= now && now - e.t0 > LOCK.windowMs) delete locks[k];
+  }
+  let e = locks[key];
+  if (e && e.until > now) return { locked: true, retry: Math.ceil((e.until - now) / 1000), justLocked: false };
+  if (!e || e.until > 0 || now - e.t0 > LOCK.windowMs) e = locks[key] = { n: 0, t0: now, until: 0 };
+  e.n++;
+  if (e.n >= LOCK.fails) {
+    e.until = now + LOCK.lockMs;
+    return { locked: true, retry: Math.ceil(LOCK.lockMs / 1000), justLocked: true };
+  }
+  return { locked: false, retry: 0, justLocked: false };
+}
+
+export function lockClear(locks, key) {
+  delete locks[key];
+}

@@ -35,6 +35,11 @@ STATS_TZ_MIN = "330"
 ALERT_ERRORS = "5"
 # Alert when today's edge cache hit rate drops below this percent (0 = off).
 ALERT_MIN_HIT_PCT = "0"
+# One client (hash of the IP) pulling more than this many GB within an hour -> Telegram alert (0 = off).
+ABUSE_GB_PER_HOUR = "30"
+# Per client limits, answered with 429 (0 = no limit). Many mobile users can share one IP (CGNAT), so keep these generous.
+MAX_CLIENT_REQS = "24"
+MAX_CLIENT_FILES = "6"
 # Optional short mode: lets https://worker/dl/<id>/<name> map to this backend URL.
 # ORIGIN_URL = "https://api.example.com"
 

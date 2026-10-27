@@ -7,7 +7,8 @@
  * is merged into one entry so a movie shows up once, not 60 times.
  */
 
-import { evaluate } from "./alerts.js";
+import { evaluate, sendTelegram } from "./alerts.js";
+import { lockStatus, lockFail, lockClear } from "./auth.js";
 
 export const MAX_ENTRIES = 60;
 const SESSION_GAP = 10 * 60 * 1000; // a new session starts after 10 min of silence
@@ -86,7 +87,7 @@ export function applyEvent(entries, ev, now) {
   if (ev.type === "start") {
     e.reqs++;
     e.range = String(ev.range || "");
-    e.live[ev.rid] = { sent: 0, ms: 0, h: 0, m: 0, hb: 0, mb: 0 };
+    e.live[ev.rid] = { sent: 0, ms: 0, h: 0, m: 0, hb: 0, mb: 0, t: now };
     e.state = "active";
   } else {
     const sent = Math.max(0, Number(ev.sent) || 0);
@@ -106,7 +107,7 @@ export function applyEvent(entries, ev, now) {
       e.state = Object.keys(e.live).length ? "active" : ev.state || "done";
       if (ev.err) e.err = String(ev.err).slice(0, 120);
     } else {
-      e.live[ev.rid] = { sent, ms, h, m, hb, mb };
+      e.live[ev.rid] = { sent, ms, h, m, hb, mb, t: now };
       e.state = "active";
     }
     const bps = Number(ev.bps) || 0;
@@ -179,7 +180,7 @@ export function dayKey(now, offsetMin = 330) {
 export function addDaily(days, ev, now, offsetMin = 330) {
   if (!ev || ev.type !== "end") return;
   const k = dayKey(now, offsetMin);
-  const d = (days[k] ||= { r: 0, b: 0, hb: 0, mb: 0, h: 0, m: 0, e: 0, f: {} });
+  const d = (days[k] ||= { r: 0, b: 0, hb: 0, mb: 0, h: 0, m: 0, e: 0, x: 0, f: {} });
   const sent = Math.max(0, Number(ev.sent) || 0);
   d.r++;
   d.b += sent;
@@ -202,6 +203,79 @@ export function addDaily(days, ev, now, offsetMin = 330) {
   const keys = Object.keys(days).sort();
   while (keys.length > MAX_DAYS) delete days[keys.shift()];
 }
+
+/** A request refused by the per-client limits. */
+export function addDenied(days, now, offsetMin = 330) {
+  const k = dayKey(now, offsetMin);
+  const d = (days[k] ||= { r: 0, b: 0, hb: 0, mb: 0, h: 0, m: 0, e: 0, x: 0, f: {} });
+  d.x = (d.x || 0) + 1;
+}
+
+// ---------------------------------------------------------------- per-client limits + heavy users
+
+const FRESH_LIVE = 8 * 60 * 1000; // a request that has been silent this long is treated as dead
+export const memUsage = {};
+
+/** Live requests / distinct files of one client (client = the 6 hex chars at the end of the session id). */
+export function clientActivity(entries, client, now, sid) {
+  let reqs = 0;
+  let files = 0;
+  let sidActive = false;
+  for (const e of entries) {
+    if (e.client !== client) continue;
+    const live = Object.values(e.live).filter((l) => now - (l.t || e.upd) < FRESH_LIVE).length;
+    if (!live) continue;
+    reqs += live;
+    files++;
+    if (e.sid === sid) sidActive = true;
+  }
+  return { reqs, files, sidActive };
+}
+
+/** -> { ok } or { ok:false, reason } */
+export function gateDecision(entries, { client, sid, maxReqs, maxFiles }, now) {
+  const a = clientActivity(entries, client, now, sid);
+  if (maxReqs > 0 && a.reqs >= maxReqs) return { ok: false, reason: `Too many parallel connections (limit ${maxReqs})` };
+  if (maxFiles > 0 && !a.sidActive && a.files >= maxFiles) return { ok: false, reason: `Too many files at once (limit ${maxFiles})` };
+  return { ok: true };
+}
+
+const HOUR = 3600 * 1000;
+
+/** Adds one finished request to the client's rolling hour. -> alert text or "" */
+export function noteUsage(usage, ev, now, limitBytes) {
+  if (!ev || ev.type !== "end" || !ev.sid) return "";
+  const client = String(ev.sid).split("|").pop();
+  if (!client) return "";
+  let u = usage[client];
+  if (!u || now - u.t0 > HOUR) u = usage[client] = { b: 0, t0: now, alerted: u ? u.alerted : 0, name: "" };
+  u.b += Math.max(0, Number(ev.sent) || 0);
+  u.name = String(ev.name || u.name).slice(0, 100);
+  for (const k of Object.keys(usage)) if (now - usage[k].t0 > 2 * HOUR) delete usage[k];
+  const keys = Object.keys(usage);
+  if (keys.length > 300) keys.sort((a, b) => usage[a].t0 - usage[b].t0).slice(0, keys.length - 300).forEach((k) => delete usage[k]);
+  if (limitBytes > 0 && u.b >= limitBytes && now - u.alerted > 6 * HOUR) {
+    u.alerted = now;
+    return `🚨 Heavy client #${client} pulled ${(u.b / 1073741824).toFixed(1)} GB in the last hour (limit ${Math.round(limitBytes / 1073741824)} GB). Latest file: ${u.name || "?"}`;
+  }
+  return "";
+}
+
+export function heavyClients(usage, entries, now, top = 5) {
+  return Object.entries(usage)
+    .filter(([, u]) => now - u.t0 <= HOUR)
+    .sort((a, b) => b[1].b - a[1].b)
+    .slice(0, top)
+    .map(([client, u]) => {
+      const e = entries.find((x) => x.client === client);
+      return { client, bytes: u.b, since: u.t0, name: u.name, country: e?.country || "", dev: e?.dev || "" };
+    });
+}
+
+export const abuseLimitBytes = (env) => {
+  const g = env?.ABUSE_GB_PER_HOUR === undefined || env?.ABUSE_GB_PER_HOUR === "" ? 30 : Number(env.ABUSE_GB_PER_HOUR);
+  return Number.isFinite(g) && g > 0 ? g * 1073741824 : 0;
+};
 
 export function noteError(errs, ev, now) {
   if (ev && ev.type === "end" && ev.state === "error") {
@@ -232,11 +306,15 @@ export class LogHub {
     this.days = {};
     this.errs = [];
     this.alert = null;
+    this.locks = {};
+    this.usage = {};
+    this.env = env || {};
     state.blockConcurrencyWhile(async () => {
       this.entries = (await state.storage.get("entries")) || [];
       this.days = (await state.storage.get("days")) || {};
       this.errs = (await state.storage.get("errs")) || [];
       this.alert = (await state.storage.get("alert")) || null;
+      this.locks = (await state.storage.get("locks")) || {};
     });
   }
 
@@ -255,6 +333,8 @@ export class LogHub {
       if (ev && ev.type === "end") {
         addDaily(this.days, ev, now, this.off);
         await this.state.storage.put("days", this.days);
+        const warn = noteUsage(this.usage, ev, now, abuseLimitBytes(this.env));
+        if (warn) await sendTelegram(this.env, warn);
         if (ev.state === "error") {
           noteError(this.errs, ev, now);
           await this.state.storage.put("errs", this.errs);
@@ -263,7 +343,37 @@ export class LogHub {
       return json({ ok: true });
     }
     if (path === "/list") return json({ entries: snapshot(this.entries, Date.now()) });
-    if (path === "/stats") return json(statsView(this.days, Date.now(), this.off));
+    if (path === "/stats") {
+      const now = Date.now();
+      return json({ ...statsView(this.days, now, this.off), heavy: heavyClients(this.usage, this.entries, now), abuse_gb: abuseLimitBytes(this.env) / 1073741824 });
+    }
+    if (request.method === "POST" && path === "/gate") {
+      const body = await request.json().catch(() => ({}));
+      const now = Date.now();
+      const r = gateDecision(this.entries, body, now);
+      if (!r.ok) {
+        addDenied(this.days, now, this.off);
+        await this.state.storage.put("days", this.days);
+      }
+      return json(r);
+    }
+    if (request.method === "POST" && path === "/lock") {
+      const body = await request.json().catch(() => ({}));
+      const key = String(body.key || "");
+      const now = Date.now();
+      if (!key) return json({ error: "no key" }, 400);
+      if (body.op === "check") return json(lockStatus(this.locks, key, now));
+      if (body.op === "clear") {
+        if (this.locks[key]) {
+          lockClear(this.locks, key);
+          await this.state.storage.put("locks", this.locks);
+        }
+        return json({ ok: true });
+      }
+      const r = lockFail(this.locks, key, now);
+      await this.state.storage.put("locks", this.locks);
+      return json(r);
+    }
     if (request.method === "POST" && path === "/alerts") {
       let body;
       try {

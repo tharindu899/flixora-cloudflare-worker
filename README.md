@@ -109,6 +109,10 @@ CSP එකේ ඒ hosts දෙක විතරක් allow කරලා ති�
 - **Purge cache**: Link tester -> paste a link -> purge cache (tap twice). Deletes that file's cached chunks. Cloudflare's edge cache is per data center,
   so this clears the location that serves you; other locations just expire (`CACHE_TTL`).
 - **Country block**: `BLOCK_COUNTRIES = "CN,RU"` in `wrangler.toml` (or as a variable). Only proxy traffic is blocked, never the UI login.
+- **Login lock**: 5 wrong passwords from one client within 15 min lock the login for 15 min (HTTP 429, even the right password is refused), and Telegram gets one notice.
+- **Heavy client alert**: a client (IP hash) that pulls more than `ABUSE_GB_PER_HOUR` (default 30) in one hour triggers a Telegram message (once per 6 h). The Stats page lists the heaviest clients of the last hour.
+- **Per-client limits**: `MAX_CLIENT_REQS` (parallel connections, default 24) and `MAX_CLIENT_FILES` (different files at once, default 6). Over the limit -> 429 with `Retry-After: 5`, nothing is fetched from the VPS,
+  and the Stats page counts it under "Limited". Set `0` to turn a limit off. Note: on mobile networks (CGNAT) many people share one IP, so do not set these too low.
 - **Light / dark** toggle in the sidebar (remembered in the browser).
 
 ## Live log

@@ -274,6 +274,7 @@ table.data-table tr:last-child td{border-bottom:none}
           <div id="dayChart"></div>
         </div>
         <div class="card" style="margin-bottom:14px" id="dayCard"><div class="empty">loading&hellip;</div></div>
+        <div class="card" style="margin-bottom:14px" id="heavyCard"></div>
         <div class="card" id="topCard"></div>
         <div class="hint" id="statsMode"></div>
       </div>
@@ -651,18 +652,23 @@ table.data-table tr:last-child td{border-bottom:none}
       row("scheduled check", st.alerts_need_do ? "needs the LOGS Durable Object" : "every 5 min", st.alerts_need_do ? C.orange : C.green) +
       row("alert on failures", st.alert_errors + " errors / 10 min") +
       row("alert on low hit rate", st.alert_min_hit ? "below " + st.alert_min_hit + "%" : "off (ALERT_MIN_HIT_PCT)") +
-      row("blocked countries", st.blocked_countries && st.blocked_countries.length ? st.blocked_countries.join(", ") : "none (BLOCK_COUNTRIES)");
+      row("blocked countries", st.blocked_countries && st.blocked_countries.length ? st.blocked_countries.join(", ") : "none (BLOCK_COUNTRIES)") +
+      row("heavy client alert", st.abuse_gb ? "over " + st.abuse_gb + " GB / hour (ABUSE_GB_PER_HOUR)" : "off") +
+      row("parallel connections", st.max_reqs ? "max " + st.max_reqs + " per client (MAX_CLIENT_REQS)" : "no limit") +
+      row("files at once", st.max_files ? "max " + st.max_files + " per client (MAX_CLIENT_FILES)" : "no limit") +
+      row("login lock", "5 wrong passwords = 15 min lock", C.green);
   }
   function renderStats(stats) {
     if (!stats) return;
     var days = stats.days, last14 = days.slice(-14), last7 = days.slice(-7);
     var sum = function (a, k) { return a.reduce(function (n, x) { return n + (x[k] || 0); }, 0); };
-    var b7 = sum(last7, "b"), hb7 = sum(last7, "hb"), r7 = sum(last7, "r"), e7 = sum(last7, "e"), h7 = sum(last7, "h"), m7 = sum(last7, "m");
+    var b7 = sum(last7, "b"), hb7 = sum(last7, "hb"), r7 = sum(last7, "r"), e7 = sum(last7, "e"), x7 = sum(last7, "x"), h7 = sum(last7, "h"), m7 = sum(last7, "m");
     $("statCards").innerHTML =
       statCard("fa-solid fa-piggy-bank", "green", "Saved (7 days)", fmtBytes(hb7), null, b7 ? Math.round(hb7 * 100 / b7) + "% of " + fmtBytes(b7) : "no traffic yet") +
       statCard("fa-solid fa-database", "pink", "Sent (7 days)", fmtBytes(b7), null, r7 + " requests") +
       statCard("fa-solid fa-bolt", "yellow", "Chunk hit rate", h7 + m7 ? Math.round(h7 * 100 / (h7 + m7)) + "%" : "-", h7 + m7 ? Math.round(h7 * 100 / (h7 + m7)) : null) +
-      statCard("fa-solid fa-triangle-exclamation", e7 ? "red" : "green", "Failed (7 days)", String(e7), null, r7 ? Math.round(e7 * 100 / r7) + "% of requests" : "");
+      statCard("fa-solid fa-triangle-exclamation", e7 ? "red" : "green", "Failed (7 days)", String(e7), null, r7 ? Math.round(e7 * 100 / r7) + "% of requests" : "") +
+      statCard("fa-solid fa-hand", x7 ? "orange" : "green", "Limited (7 days)", String(x7), null, x7 ? "refused with 429 (per-client limits)" : "nobody hit the limits");
     // 14 day stacked bars (div based, so they follow the theme)
     var byDay = {}; days.forEach(function (x) { byDay[x.d] = x; });
     var keys = [], base = new Date(stats.today + "T00:00:00Z");
@@ -688,8 +694,16 @@ table.data-table tr:last-child td{border-bottom:none}
     var files = {};
     last7.forEach(function (x) { Object.keys(x.f || {}).forEach(function (n) { var f = files[n] || (files[n] = [0, 0]); f[0] += x.f[n][0]; f[1] += x.f[n][1]; }); });
     var top = Object.keys(files).sort(function (a, b) { return files[b][0] - files[a][0]; }).slice(0, 10);
-    $("topCard").innerHTML = top.length ? '<table class="data-table"><thead><tr><th>Top files (7 days)</th><th>Sent</th><th>Requests</th></tr></thead><tbody>' +
+    $("topCard").innerHTML = top.length ? '<div class="pad" style="padding-bottom:0"><div class="mig-title"><i class="fa-solid fa-ranking-star" style="color:var(--accent-pink)"></i>top files (7 days)</div></div><table class="data-table"><thead><tr><th>Top files (7 days)</th><th>Sent</th><th>Requests</th></tr></thead><tbody>' +
       top.map(function (n) { return '<tr><td class="nolabel"><div class="fname">' + esc(n) + '</div></td><td data-label="sent">' + fmtBytes(files[n][0]) + '</td><td data-label="requests">' + files[n][1] + "</td></tr>"; }).join("") + "</tbody></table>" : "";
+    var hv = stats.heavy || [];
+    $("heavyCard").innerHTML = hv.length ? '<div class="pad" style="padding-bottom:0"><div class="mig-title"><i class="fa-solid fa-user-clock" style="color:var(--state-running)"></i>heavy clients (last hour)</div></div><table class="data-table"><thead><tr><th>Heavy clients (last hour)</th><th>Sent</th><th>Latest file</th></tr></thead><tbody>' +
+      hv.map(function (x) {
+        var over = stats.abuse_gb && x.bytes >= stats.abuse_gb * 1073741824;
+        return '<tr><td class="nolabel"><div class="fname">#' + esc(x.client) + '</div><div class="fsub">' + esc([x.dev, x.country].filter(Boolean).join(" · ") || "unknown") + "</div></td>" +
+          '<td data-label="sent"><span style="color:' + (over ? "var(--state-error)" : "var(--text)") + '">' + fmtBytes(x.bytes) + "</span></td>" +
+          '<td data-label="file">' + esc(x.name || "-") + "</td></tr>";
+      }).join("") + "</tbody></table>" : "";
     $("statsMode").textContent = stats.mode === "durable" ? "Daily totals are kept for 31 days in the Durable Object. Days follow STATS_TZ_MIN (default Sri Lanka)." : "Memory mode (no Durable Object) - daily totals reset when the worker restarts.";
   }
   loadExtra(); setInterval(function () { if (!document.hidden) loadExtra(); }, 30000);
