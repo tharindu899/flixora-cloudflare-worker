@@ -84,11 +84,18 @@ curl -s -D- -o /dev/null -H "Range: bytes=0-1048575" "$URL" | grep -i "x-flx-cac
 - Telegram limit/flood wait අඩු වෙන්නේ repeat chunk requests cache එකෙන් serve වෙන නිසා සහ එකම isolate එකේ එකම chunk එක එකපාර ඉල්ලුවොත් එකම download එකට wait කරන නිසා. Backend එක 429/502/503/504 දුන්නොත් Worker එක 2 පාරක් retry කරනවා. ඒත් හැම viewer ම අලුත් file එකක් පළවෙනි පාරට ඉල්ලුවොත් Telegram එකට යන requests ඒකම තමයි.
 - Cloudflare Free plan එකෙන් video වගේ ලොකු non-HTML content ගොඩක් cache කරලා serve කිරීම ගැන Cloudflare ගේ Terms of Service එකේ කොටසක් තියෙනවා. Traffic එක ලොකු වුණොත් ඒක ඔයාම check කරගන්න.
 
-## Dracula UI
+## Dashboard UI
 
-Worker URL එක browser එකෙන් open කරාම (`/` හෝ `/ui`) Dracula theme එකේ status page එකක් එනවා:
-live status cards (edge cache, chunk size, token check, origins), link tester (HEAD / Range 0-0, headers + checks),
-endpoint cheat-sheet, සහ Dracula/Alucard theme toggle. `/health` තාමත් JSON.
+Worker URL එක browser එකෙන් open කරාම (`/` හෝ `/ui`) Vps-Dashboard එකේ වගේම Dracula dashboard එකක් එනවා:
+sidebar + topbar, පිටු 4ක් (`#overview`, `#log`, `#test`, `#setup`).
+
+- **Overview**: status / edge cache / chunk size / token check / origins / latency cards, throughput chart, cache hit donut
+- **Live log**: ඊළඟ section එක බලන්න (phone එකේ table එක card list එකක් විදියට පෙනෙනවා)
+- **Link tester**: backend link එක paste කරලා HEAD / Range 0-0 test (checks + headers)
+- **Setup**: endpoint examples (copy), `X-Flx-Cache` අර්ථ, current configuration
+
+`/health` තාමත් JSON. Fonts (Inter, IBM Plex Mono) සහ Font Awesome load වෙන්නේ Google Fonts / cdnjs වලින්,
+CSP එකේ ඒ hosts දෙක විතරක් allow කරලා තියෙනවා.
 
 ## Live log
 
