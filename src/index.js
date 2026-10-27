@@ -444,7 +444,7 @@ async function serve(request, ctx, c, parsed, reqUrl) {
 
   function buildHeaders(m, r, isPartial, cacheTag) {
     const h = new Headers();
-    h.set("Content-Type", m.type);
+    h.set("Content-Type", parsed.isDownload ? "application/octet-stream" : m.type);
     h.set("Accept-Ranges", "bytes");
     h.set("Content-Length", String(r.end - r.start + 1));
     if (isPartial) h.set("Content-Range", `bytes ${r.start}-${r.end}/${m.size}`);
