@@ -9,7 +9,7 @@ workers_dev = true
 
 [vars]
 # REQUIRED - host(s) of your Flixora backend (same host as API_BASE_URL), comma separated.
-ALLOWED_ORIGINS = "api.example.com"
+ALLOWED_ORIGINS = "api.toxybox99.eu.org"
 
 # Chunk size cached at the edge, in MB (1-32). 4 is a good balance for Free plan memory.
 CHUNK_MB = "4"
