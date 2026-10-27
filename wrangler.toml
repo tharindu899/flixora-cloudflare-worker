@@ -5,7 +5,7 @@ workers_dev = true
 
 # Edge caching only works on a custom domain (not *.workers.dev).
 # Uncomment and set your own hostname (domain must be on Cloudflare):
-# routes = [{ pattern = "stream.example.com", custom_domain = true }]
+routes = [{ pattern = "stream.example.com", custom_domain = true }]
 
 [vars]
 # REQUIRED - host(s) of your Flixora backend (same host as API_BASE_URL), comma separated.
