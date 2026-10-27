@@ -13,6 +13,8 @@
  * 10 ms CPU (bodies are piped natively, no per-byte JS except on the 2 edge chunks).
  */
 
+import { UI_HTML } from "./ui.js";
+
 const MIB = 1024 * 1024;
 const SUBTITLE_EXT = new Set([".srt", ".vtt", ".ass", ".ssa", ".sub"]);
 const RETRY_STATUS = new Set([429, 502, 503, 504]);
@@ -600,14 +602,33 @@ async function handle(request, env, ctx) {
   }
   if (request.method !== "GET" && request.method !== "HEAD") return jsonError(405, "Method not allowed");
 
+  const wantsHtml = (request.headers.get("accept") || "").includes("text/html");
+  if (url.pathname === "/ui" || (url.pathname === "/" && wantsHtml)) {
+    return new Response(request.method === "HEAD" ? null : UI_HTML, {
+      headers: {
+        "Content-Type": "text/html; charset=utf-8",
+        "Cache-Control": "no-cache",
+        "X-Content-Type-Options": "nosniff",
+        "Referrer-Policy": "no-referrer",
+        "Content-Security-Policy":
+          "default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'; img-src data:; connect-src 'self'; base-uri 'none'; frame-ancestors 'none'",
+      },
+    });
+  }
+
   if (url.pathname === "/" || url.pathname === "/health") {
     return new Response(
       JSON.stringify({
         name: "flixora-proxy",
         ok: c.allowed.size > 0,
         chunk_mb: c.chunkMB,
+        max_chunks: c.maxChunks,
         edge_cache: c.cacheOn,
+        prefetch_next: c.prefetchNext,
+        cap_open_ranges: c.capOpenRanges,
+        backend_turnstile: c.backendTurnstile,
         download_token_check: Boolean(env.TURNSTILE_SECRET),
+        origins: c.allowed.size,
         note: c.allowed.size ? undefined : "ALLOWED_ORIGINS is not configured",
       }),
       { headers: withCors(new Headers({ "Content-Type": "application/json", "Cache-Control": "no-store" })) }

@@ -241,3 +241,14 @@ test("CORS preflight and status page", async () => {
   assert.equal(r.res.status, 200);
   assert.equal(JSON.parse(new TextDecoder().decode(r.body)).ok, true);
 });
+
+test("browser gets the Dracula UI, API clients still get JSON", async () => {
+  let r = await call("/", { headers: { accept: "text/html" } });
+  assert.equal(r.res.status, 200);
+  assert.match(r.res.headers.get("content-type"), /text\/html/);
+  assert.match(new TextDecoder().decode(r.body), /Flixora/);
+  r = await call("/ui");
+  assert.match(r.res.headers.get("content-type"), /text\/html/);
+  r = await call("/health");
+  assert.match(r.res.headers.get("content-type"), /json/);
+});

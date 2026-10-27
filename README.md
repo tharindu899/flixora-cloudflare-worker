@@ -83,3 +83,9 @@ curl -s -D- -o /dev/null -H "Range: bytes=0-1048575" "$URL" | grep -i "x-flx-cac
 - Full-file download (Range නැති 200) එකේ, පළවෙනි chunks කීපය විතරක් cache path එකෙන් යනවා, ඉතුරු කොටස එක origin request එකකින් stream වෙනවා (Free subrequest limit නිසා). Stream/seek වලට (Range requests) full benefit එක තියෙනවා. Download manager (IDM වගේ) ranges දාලා ඉල්ලුවොත් ඒවටත් cache benefit එක ලැබෙනවා.
 - Telegram limit/flood wait අඩු වෙන්නේ repeat chunk requests cache එකෙන් serve වෙන නිසා සහ එකම isolate එකේ එකම chunk එක එකපාර ඉල්ලුවොත් එකම download එකට wait කරන නිසා. Backend එක 429/502/503/504 දුන්නොත් Worker එක 2 පාරක් retry කරනවා. ඒත් හැම viewer ම අලුත් file එකක් පළවෙනි පාරට ඉල්ලුවොත් Telegram එකට යන requests ඒකම තමයි.
 - Cloudflare Free plan එකෙන් video වගේ ලොකු non-HTML content ගොඩක් cache කරලා serve කිරීම ගැන Cloudflare ගේ Terms of Service එකේ කොටසක් තියෙනවා. Traffic එක ලොකු වුණොත් ඒක ඔයාම check කරගන්න.
+
+## Dracula UI
+
+Worker URL එක browser එකෙන් open කරාම (`/` හෝ `/ui`) Dracula theme එකේ status page එකක් එනවා:
+live status cards (edge cache, chunk size, token check, origins), link tester (HEAD / Range 0-0, headers + checks),
+endpoint cheat-sheet, සහ Dracula/Alucard theme toggle. `/health` තාමත් JSON.
