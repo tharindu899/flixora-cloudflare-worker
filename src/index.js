@@ -517,8 +517,9 @@ async function serve(request, ctx, c, parsed, reqUrl) {
 
   const headers = buildHeaders(meta, { start, end }, partial, first.hit ? "HIT" : "MISS");
 
-  const Identity = globalThis.IdentityTransformStream || TransformStream;
-  const { readable, writable } = new Identity();
+  // FixedLengthStream makes Cloudflare send a real Content-Length (otherwise it falls back to chunked -> "size ?")
+  const { readable, writable } =
+    typeof FixedLengthStream !== "undefined" ? new FixedLengthStream(end - start + 1) : new TransformStream();
 
   async function pump() {
     let pos = start;
