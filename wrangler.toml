@@ -29,3 +29,13 @@ PREFETCH_NEXT = "true"
 BACKEND_USES_TURNSTILE = "true"
 # Optional short mode: lets https://worker/dl/<id>/<name> map to this backend URL.
 # ORIGIN_URL = "https://api.example.com"
+
+# Activity log (Live log panel). Free plan: Durable Objects must be SQLite-backed.
+# Remove these two blocks if you do not want the persistent log (memory mode is used then).
+[[durable_objects.bindings]]
+name = "LOGS"
+class_name = "LogHub"
+
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["LogHub"]

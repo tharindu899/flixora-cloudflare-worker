@@ -1,2 +1,4 @@
 # copy to .dev.vars for `npm run dev`
 TURNSTILE_SECRET=
+# password for the Live log panel (/logs.json)
+LOG_TOKEN=

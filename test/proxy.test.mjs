@@ -252,3 +252,74 @@ test("browser gets the Dracula UI, API clients still get JSON", async () => {
   r = await call("/health");
   assert.match(r.res.headers.get("content-type"), /json/);
 });
+
+// ---------------------------------------------------------------- activity log
+const { LogHub, applyEvent, snapshot } = await import("../src/log.js");
+const LOGENV = { ...ENV, LOG_TOKEN: "k3y" };
+const getLog = async (env = LOGENV, key = "k3y") =>
+  call("/logs.json", { env, headers: key ? { "x-log-key": key } : {} });
+
+test("log endpoint is locked without LOG_TOKEN / wrong key", async () => {
+  assert.equal((await getLog(ENV, "x")).res.status, 403);
+  assert.equal((await getLog(LOGENV, "nope")).res.status, 401);
+  assert.equal((await getLog(LOGENV, "")).res.status, 401);
+});
+
+test("play and download show up in the log with file, size and speed", async () => {
+  resetAll();
+  await call("/logs/clear", { env: LOGENV, method: "POST", headers: { "x-log-key": "k3y", "user-agent": "VLC/3.0 (Android)" } });
+  await call(plain(), { env: LOGENV, headers: { Range: "bytes=0-", "user-agent": "Mozilla/5.0 (Linux; Android 14) Chrome/120.0 Safari/537.36" } });
+  const tok = makeToken(FILE_ID);
+  await call(`/https://${HOST}/dld/${tok}/${FILE_ID}/movie.mkv`, { env: LOGENV });
+  const { body } = await getLog();
+  const d = JSON.parse(new TextDecoder().decode(body));
+  assert.equal(d.mode, "memory");
+  const play = d.entries.find((e) => e.kind === "play");
+  const dl = d.entries.find((e) => e.kind === "download");
+  assert.ok(play && dl);
+  assert.equal(play.name, "movie.mkv");
+  assert.equal(play.state, "done");
+  assert.equal(play.total, SIZE);
+  assert.ok(play.sent > 0 && play.sent <= SIZE);
+  assert.equal(play.dev, "Chrome on Android");
+  assert.equal(dl.sent, SIZE);
+  assert.equal(dl.state, "done");
+  assert.ok(dl.hit + dl.miss >= 1);
+  // clear works
+  await call("/logs/clear", { env: LOGENV, method: "POST", headers: { "x-log-key": "k3y" } });
+  assert.equal(JSON.parse(new TextDecoder().decode((await getLog()).body)).entries.length, 0);
+});
+
+test("sessions merge: several Range requests of one player = one log entry", () => {
+  const entries = [];
+  const base = { sid: "f|play|abc", name: "m.mkv", kind: "play", total: 1000 };
+  applyEvent(entries, { ...base, rid: "r1", type: "start" }, 1000);
+  applyEvent(entries, { ...base, rid: "r1", type: "end", state: "done", sent: 400, ms: 1000, bps: 400 }, 2000);
+  applyEvent(entries, { ...base, rid: "r2", type: "start" }, 3000);
+  applyEvent(entries, { ...base, rid: "r2", type: "progress", sent: 100, ms: 500, bps: 200 }, 3500);
+  const [e] = snapshot(entries, 3600);
+  assert.equal(entries.length, 1);
+  assert.equal(e.reqs, 2);
+  assert.equal(e.sent, 500);
+  assert.equal(e.state, "active");
+  assert.equal(e.avg, Math.round((500 * 1000) / 1500));
+  assert.equal(snapshot(entries, 3500 + 21 * 60 * 1000)[0].state, "lost");
+});
+
+test("Durable Object mode: LogHub stores events and the worker reads them back", async () => {
+  resetAll();
+  const kv = new Map();
+  const hub = new LogHub({
+    storage: { get: async (k) => kv.get(k), put: async (k, v) => kv.set(k, structuredClone(v)) },
+    blockConcurrencyWhile: (fn) => fn(),
+  });
+  const LOGS = { idFromName: (n) => n, get: () => ({ fetch: (u, init) => hub.fetch(new Request(u, init)) }) };
+  const env = { ...LOGENV, LOGS };
+  await call(plain(), { env, headers: { Range: "bytes=0-" } });
+  const d = JSON.parse(new TextDecoder().decode((await getLog(env)).body));
+  assert.equal(d.mode, "durable");
+  assert.equal(d.entries.length, 1);
+  assert.equal(d.entries[0].state, "done");
+  assert.ok(d.entries[0].sent > 0);
+  assert.ok(kv.get("entries").length === 1, "persisted to DO storage");
+});

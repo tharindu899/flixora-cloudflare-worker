@@ -94,6 +94,23 @@ footer a{color:var(--purple)}
   background:var(--purple);color:#282a36;font-weight:600;padding:8px 16px;border-radius:10px;opacity:0;
   transition:.25s;pointer-events:none}
 .toast.show{opacity:1;transform:translate(-50%,0)}
+.chip{padding:5px 12px;border-radius:999px;font-size:13px}
+.chip.on{background:var(--purple);border-color:var(--purple);color:#282a36;font-weight:600}
+.loglist{display:grid;gap:10px;margin-top:14px}
+.le{background:var(--bg);border:1px solid var(--line);border-radius:12px;padding:12px 14px}
+.le.act{border-color:var(--green);box-shadow:0 0 0 3px rgba(80,250,123,.08)}
+.le-top{display:flex;align-items:center;gap:9px}
+.ico{font-size:15px;width:22px;text-align:center}
+.fname{flex:1;min-width:0;font-size:14px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.bar{height:6px;border-radius:99px;background:var(--line);margin:10px 0 8px;overflow:hidden}
+.bar i{display:block;height:100%;border-radius:99px;background:linear-gradient(90deg,var(--cyan),var(--purple))}
+.le.act .bar i{background:linear-gradient(90deg,var(--green),var(--cyan))}
+.le-meta{display:flex;flex-wrap:wrap;gap:4px 14px;font-size:12.5px;color:var(--mute)}
+.le-meta b{color:var(--fg);font-weight:600}
+.pulse{animation:pulse 1.4s ease-in-out infinite}
+@keyframes pulse{50%{opacity:.35}}
+.lock{margin-top:12px;background:var(--bg);border:1px dashed var(--orange);border-radius:12px;padding:12px}
+.lock .hint{margin:0 0 10px;color:var(--orange)}
 </style>
 </head>
 <body>
@@ -113,6 +130,28 @@ footer a{color:var(--purple)}
     <h2>Status</h2>
     <div class="grid" id="cards"></div>
     <div class="hint" id="healthNote"></div>
+  </section>
+
+  <section>
+    <h2>Live log</h2>
+    <div class="grid" id="logSum"></div>
+    <div class="row" style="margin-top:12px;align-items:center">
+      <button class="chip on" data-f="all">All</button>
+      <button class="chip" data-f="play">Play</button>
+      <button class="chip" data-f="download">Download</button>
+      <span class="grow"></span>
+      <button class="icon" id="logAuto">Live: on</button>
+      <button class="icon" id="logClr">Clear</button>
+    </div>
+    <div class="lock" id="logLock" style="display:none">
+      <div class="hint" id="logLockMsg"></div>
+      <div class="row">
+        <input id="logKey" type="password" autocomplete="off" placeholder="LOG_TOKEN">
+        <button class="primary" id="logSave">Unlock</button>
+      </div>
+    </div>
+    <div class="loglist" id="logList"></div>
+    <div class="hint" id="logMode"></div>
   </section>
 
   <section>
@@ -326,6 +365,112 @@ footer a{color:var(--purple)}
   }
   $("tHead").onclick = function () { run("head"); };
   $("tRange").onclick = function () { run("range"); };
+
+  /* ---------------- live log ---------------- */
+  var logKey = "", logFilter = "all", logAuto = true, logData = null, logBusy = false;
+  try { logKey = localStorage.getItem("flx-key") || ""; } catch (e) {}
+  $("logKey").value = logKey;
+
+  function spd(n) { return n > 0 ? fmtBytes(n) + "/s" : "-"; }
+  function dur(ms) {
+    var s = Math.round(ms / 1000);
+    if (s < 60) return s + "s";
+    var m = Math.floor(s / 60);
+    return m < 60 ? m + "m " + (s % 60) + "s" : Math.floor(m / 60) + "h " + (m % 60) + "m";
+  }
+  function ago(now, t) {
+    var s = Math.max(0, Math.round((now - t) / 1000));
+    if (s < 5) return "just now";
+    if (s < 90) return s + "s ago";
+    var m = Math.round(s / 60);
+    return m < 90 ? m + "m ago" : Math.round(m / 60) + "h ago";
+  }
+  function stateBadge(st) {
+    var map = { active: ["b-g", "live"], done: ["b-p", "done"], aborted: ["b-o", "stopped"], error: ["b-r", "error"], lost: ["b-o", "lost"] };
+    var m = map[st] || ["b-o", st];
+    return '<span class="badge ' + m[0] + (st === "active" ? " pulse" : "") + '">' + m[1] + "</span>";
+  }
+  function showLock(msg) {
+    $("logLock").style.display = "block";
+    $("logLockMsg").textContent = msg;
+    $("logList").innerHTML = "";
+    $("logSum").innerHTML = "";
+    $("logMode").textContent = "";
+  }
+  function renderLog() {
+    if (!logData) return;
+    var now = logData.now, all = logData.entries || [];
+    var list = all.filter(function (e) { return logFilter === "all" || e.kind === logFilter; });
+    var act = 0, tot = 0, hit = 0, miss = 0, nowBps = 0;
+    all.forEach(function (e) {
+      if (e.state === "active") { act++; nowBps += e.bps || 0; }
+      tot += e.sent; hit += e.hit; miss += e.miss;
+    });
+    $("logSum").innerHTML =
+      card("Active now", act, act ? "c-g" : "c-m") +
+      card("Speed now", spd(nowBps), nowBps ? "c-g" : "c-m") +
+      card("Transferred", fmtBytes(tot), "c-c") +
+      card("Cache hit rate", hit + miss ? Math.round((hit * 100) / (hit + miss)) + "%" : "-", "c-p");
+    $("logMode").textContent = logData.mode === "durable"
+      ? "Stored in Durable Object - last 60 sessions. Bytes are counted per finished chunk."
+      : "Memory mode (no Durable Object bound) - log resets when the worker restarts and may split across instances.";
+    if (!list.length) { $("logList").innerHTML = '<div class="hint">No activity yet. Play or download something.</div>'; return; }
+    $("logList").innerHTML = list.map(function (e) {
+      var pct = e.total > 0 ? Math.min(100, Math.round((e.sent * 100) / e.total)) : 0;
+      var isAct = e.state === "active";
+      var parts = [];
+      parts.push("<span><b>" + fmtBytes(e.sent) + "</b>" + (e.total ? " of " + fmtBytes(e.total) + " (" + pct + "%)" : "") + "</span>");
+      if (isAct) parts.push("<span>now <b>" + spd(e.bps) + "</b></span>");
+      parts.push("<span>avg <b>" + spd(e.avg) + "</b></span>");
+      if (e.peak) parts.push("<span>peak " + spd(e.peak) + "</span>");
+      parts.push("<span>" + e.reqs + " req &middot; " + dur(e.busy_ms) + " active</span>");
+      if (e.hit + e.miss) parts.push("<span>cache " + e.hit + " hit / " + e.miss + " miss</span>");
+      var who = [e.dev, e.country].filter(Boolean).join(" &middot; ");
+      parts.push("<span>" + esc(who || "unknown") + (e.client ? " &middot; #" + esc(e.client) : "") + "</span>");
+      parts.push("<span>" + ago(now, isAct ? e.t0 : e.upd) + "</span>");
+      if (e.err) parts.push('<span class="c-r">' + esc(e.err) + "</span>");
+      return '<div class="le' + (isAct ? " act" : "") + '"><div class="le-top"><span class="ico">' +
+        (e.kind === "download" ? "&#11015;" : "&#9654;") + '</span><b class="fname" title="' + esc(e.name) + '">' + esc(e.name) +
+        "</b>" + stateBadge(e.state) + '</div><div class="bar"><i style="width:' + pct + '%"></i></div><div class="le-meta">' +
+        parts.join("") + "</div></div>";
+    }).join("");
+  }
+  function pollLog() {
+    if (logBusy) return;
+    logBusy = true;
+    fetch("/logs.json", { cache: "no-store", headers: { "x-log-key": logKey } }).then(function (r) {
+      if (r.status === 403) { showLock("LOG_TOKEN is not set on the worker. Add it as a secret in the Cloudflare dashboard (Worker > Settings > Variables and Secrets), then enter the same value here."); return null; }
+      if (r.status === 401) { showLock(logKey ? "Wrong key - try again." : "Enter your LOG_TOKEN to see the log."); return null; }
+      return r.json();
+    }).then(function (d) {
+      if (!d) return;
+      $("logLock").style.display = "none";
+      logData = d; renderLog();
+    }).catch(function () {}).then(function () { logBusy = false; });
+  }
+  $("logSave").onclick = function () {
+    logKey = $("logKey").value.trim();
+    try { localStorage.setItem("flx-key", logKey); } catch (e) {}
+    pollLog();
+  };
+  $("logKey").addEventListener("keydown", function (e) { if (e.key === "Enter") $("logSave").onclick(); });
+  $("logAuto").onclick = function () {
+    logAuto = !logAuto;
+    $("logAuto").textContent = "Live: " + (logAuto ? "on" : "off");
+    if (logAuto) pollLog();
+  };
+  $("logClr").onclick = function () {
+    fetch("/logs/clear", { method: "POST", headers: { "x-log-key": logKey } }).then(function () { logData = null; pollLog(); toast("Log cleared"); });
+  };
+  Array.prototype.forEach.call(document.querySelectorAll(".chip"), function (b) {
+    b.onclick = function () {
+      logFilter = b.getAttribute("data-f");
+      Array.prototype.forEach.call(document.querySelectorAll(".chip"), function (x) { x.className = "chip" + (x === b ? " on" : ""); });
+      renderLog();
+    };
+  });
+  pollLog();
+  setInterval(function () { if (logAuto && !document.hidden) pollLog(); }, 3000);
 })();
 </script>
 </body>

@@ -89,3 +89,17 @@ curl -s -D- -o /dev/null -H "Range: bytes=0-1048575" "$URL" | grep -i "x-flx-cac
 Worker URL එක browser එකෙන් open කරාම (`/` හෝ `/ui`) Dracula theme එකේ status page එකක් එනවා:
 live status cards (edge cache, chunk size, token check, origins), link tester (HEAD / Range 0-0, headers + checks),
 endpoint cheat-sheet, සහ Dracula/Alucard theme toggle. `/health` තාමත් JSON.
+
+## Live log
+
+UI එකේ **Live log** panel එක: play / download වෙන හැම file එකකම නම, size, progress, speed (now / avg / peak),
+cache hit/miss, device + country (IP එක save කරන්නේ නෑ, hash එකක් විතරයි), requests ගණන. Player එකක Range requests
+ඔක්කොම එක entry එකකට merge වෙනවා.
+
+- **LOG_TOKEN secret එකක් දාන්න** (නැත්නම් log එක lock): Cloudflare dashboard -> Workers -> flixora-proxy -> Settings -> Variables and Secrets -> Add -> type *Secret*, name `LOG_TOKEN`.
+  ඒ value එකම UI එකේ Live log එකේ ගහලා Unlock කරන්න.
+- `wrangler.toml` එකේ `LOGS` Durable Object binding එක තියෙනවා නම් log එක persist වෙනවා (අන්තිම session 60).
+  ඒක අයින් කරොත් memory mode (worker restart වුණාම මැකෙනවා).
+- Bytes count වෙන්නේ chunk එකක් ඉවර වුණාම. ඒ නිසා ගොඩක් ලොකු download එකක් අතරමග නතර කළොත් අන්තිම partial chunk එක ගණන් ගන්නේ නෑ.
+- Free plan එකේ subrequest limit එකට log එකට 10ක් reserve වෙනවා (LOGS bound නම් විතරක්).
+

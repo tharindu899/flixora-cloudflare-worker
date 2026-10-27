@@ -14,12 +14,16 @@
  */
 
 import { UI_HTML } from "./ui.js";
+import { applyEvent, snapshot, uaLabel, memEntries } from "./log.js";
+
+export { LogHub } from "./log.js";
 
 const MIB = 1024 * 1024;
 const SUBTITLE_EXT = new Set([".srt", ".vtt", ".ass", ".ssa", ".sub"]);
 const RETRY_STATUS = new Set([429, 502, 503, 504]);
 const SUBREQUEST_BUDGET = 44; // Free plan hard limit is 50; keep headroom
 const MIN_BUDGET_FOR_CACHED_CHUNK = 4; // match + fetch + put (+1 spare)
+const LOG_RESERVE = 10; // subrequests kept for the Durable Object activity log (only when LOGS is bound)
 
 // chunk key -> promise of the cache.put that is storing it (same isolate only)
 const pending = new Map();
@@ -117,6 +121,30 @@ async function verifyDownloadToken(secret, fileId, token) {
   const key = await crypto.subtle.importKey("raw", TEXT.encode(secret), { name: "HMAC", hash: "SHA-256" }, false, ["sign"]);
   const mac = hex(await crypto.subtle.sign("HMAC", key, TEXT.encode(`${expires}:${idHash}`))).slice(0, 32);
   return timingSafeEqual(`${expires}.${mac}`, text);
+}
+
+// ---------------------------------------------------------------- activity log helpers
+
+async function makeLogCtx(request, parsed) {
+  const ip = request.headers.get("cf-connecting-ip") || "";
+  let client = "local";
+  if (ip) {
+    try {
+      client = hex(await crypto.subtle.digest("SHA-256", TEXT.encode(ip))).slice(0, 6);
+    } catch (_) {
+      client = "anon";
+    }
+  }
+  const kind = parsed.isDownload ? "download" : "play";
+  return {
+    kind,
+    sid: `${parsed.id}|${kind}|${client}`,
+    meta: {
+      client,
+      country: request.cf?.country || request.headers.get("cf-ipcountry") || "",
+      dev: uaLabel(request.headers.get("user-agent")),
+    },
+  };
 }
 
 // ---------------------------------------------------------------- target parsing
@@ -299,10 +327,10 @@ function downloadDisposition(meta, parsed) {
 
 // ---------------------------------------------------------------- main serve
 
-async function serve(request, ctx, c, parsed, reqUrl) {
+async function serve(request, ctx, c, parsed, reqUrl, env) {
   const cache = caches.default;
   const base = reqUrl.origin;
-  const budget = { left: SUBREQUEST_BUDGET };
+  const budget = { left: SUBREQUEST_BUDGET - (env.LOGS ? LOG_RESERVE : 0), logLeft: LOG_RESERVE };
   const C = c.chunk;
   const chunkKey = (i) => `${base}/__flx/c/${parsed.id}/${c.chunkMB}/${i}`;
   const metaKey = `${base}/__flx/m/${parsed.id}`;
@@ -523,11 +551,43 @@ async function serve(request, ctx, c, parsed, reqUrl) {
   const { readable, writable } =
     typeof FixedLengthStream !== "undefined" ? new FixedLengthStream(end - start + 1) : new TransformStream();
 
+  // ---- activity log (best effort - never blocks or breaks the stream)
+  const t0 = Date.now();
+  const logCtx = await makeLogCtx(request, parsed);
+  const rid = Math.random().toString(36).slice(2, 8);
+  const send = (ev, final) => {
+    ev.sid = logCtx.sid;
+    ev.rid = rid;
+    try {
+      if (!env.LOGS) return applyEvent(memEntries, ev, Date.now());
+      if (budget.logLeft < (final ? 1 : 2)) return; // always keep one call for the final event
+      budget.logLeft--;
+      const stub = env.LOGS.get(env.LOGS.idFromName("main"));
+      ctx.waitUntil(
+        stub
+          .fetch("https://log/event", { method: "POST", body: JSON.stringify(ev) })
+          .then((r) => cancelBody(r))
+          .catch(() => {})
+      );
+    } catch (_) {
+      /* logging must never affect streaming */
+    }
+  };
+  send({ type: "start", ...logCtx.meta, kind: logCtx.kind, name: parsed.name, total: meta.size, range: `${start}-${end}` });
+
   async function pump() {
     let pos = start;
     let idx = startIdx;
     let src = first;
     let nextP = null;
+    let hits = 0;
+    let misses = 0;
+    let nextReportAt = 3000; // progress events at ~3s, 6.6s, 14s, 32s ... (few subrequests)
+    const report = (type, state, err) => {
+      const ms = Date.now() - t0;
+      const sent = Math.max(0, pos - start);
+      send({ type, state, err, sent, ms, h: hits, m: misses, bps: ms > 0 ? Math.round((sent * 1000) / ms) : 0 }, type === "end");
+    };
     try {
       while (pos <= end) {
         if (!src) {
@@ -565,10 +625,18 @@ async function serve(request, ctx, c, parsed, reqUrl) {
         await body.pipeTo(writable, { preventClose: true });
         pos += take;
         idx++;
+        if (src.hit) hits++;
+        else misses++;
         src = null;
+        if (Date.now() - t0 >= nextReportAt) {
+          report("progress");
+          nextReportAt *= 2.2;
+        }
       }
       await writable.getWriter().close();
+      report("end", "done");
     } catch (e) {
+      report("end", e instanceof HttpError ? "error" : "aborted", e instanceof HttpError ? e.message : "");
       try {
         await writable.abort(e);
       } catch (_) {
@@ -600,7 +668,8 @@ async function handle(request, env, ctx) {
     h.set("Access-Control-Max-Age", "86400");
     return new Response(null, { status: 204, headers: h });
   }
-  if (request.method !== "GET" && request.method !== "HEAD") return jsonError(405, "Method not allowed");
+  const isLogClear = request.method === "POST" && url.pathname === "/logs/clear";
+  if (request.method !== "GET" && request.method !== "HEAD" && !isLogClear) return jsonError(405, "Method not allowed");
 
   const wantsHtml = (request.headers.get("accept") || "").includes("text/html");
   if (url.pathname === "/ui" || (url.pathname === "/" && wantsHtml)) {
@@ -635,6 +704,29 @@ async function handle(request, env, ctx) {
     );
   }
 
+  if (url.pathname === "/logs.json" || url.pathname === "/logs/clear") {
+    if (!env.LOG_TOKEN) return jsonError(403, "LOG_TOKEN is not set on the worker");
+    if (!timingSafeEqual(String(env.LOG_TOKEN), request.headers.get("x-log-key") || "")) return jsonError(401, "Wrong log key");
+    const plain = (obj) =>
+      new Response(JSON.stringify(obj), { headers: { "Content-Type": "application/json", "Cache-Control": "no-store" } });
+    try {
+      const stub = env.LOGS ? env.LOGS.get(env.LOGS.idFromName("main")) : null;
+      if (url.pathname === "/logs/clear") {
+        if (request.method !== "POST") return jsonError(405, "Use POST");
+        if (stub) await stub.fetch("https://log/clear", { method: "POST" });
+        else memEntries.length = 0;
+        return plain({ ok: true });
+      }
+      if (stub) {
+        const d = await (await stub.fetch("https://log/list")).json();
+        return plain({ mode: "durable", now: Date.now(), entries: d.entries || [] });
+      }
+      return plain({ mode: "memory", now: Date.now(), entries: snapshot(memEntries, Date.now()) });
+    } catch (_) {
+      return jsonError(502, "Log store unavailable");
+    }
+  }
+
   if (!c.allowed.size) return jsonError(500, "ALLOWED_ORIGINS is not configured");
 
   let parsed;
@@ -659,7 +751,7 @@ async function handle(request, env, ctx) {
     }
   }
 
-  return serve(request, ctx, c, parsed, url);
+  return serve(request, ctx, c, parsed, url, env);
 }
 
 export default {
