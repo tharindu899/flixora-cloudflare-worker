@@ -27,6 +27,14 @@ PREFETCH_NEXT = "true"
 # Backend has TURNSTILE_SECRET set? Then keep "true" and add the same value as a Worker secret.
 # Backend has Turnstile OFF? Set "false" so downloads are cached too.
 BACKEND_USES_TURNSTILE = "true"
+# Countries that may not use the proxy (ISO codes, comma separated). The UI login is never blocked.
+# BLOCK_COUNTRIES = "CN,RU"
+# Day boundary for the daily stats, minutes after UTC (330 = Sri Lanka).
+STATS_TZ_MIN = "330"
+# Telegram alerts (secrets TG_BOT_TOKEN + TG_CHAT_ID): this many failed streams in 10 min -> alert.
+ALERT_ERRORS = "5"
+# Alert when today's edge cache hit rate drops below this percent (0 = off).
+ALERT_MIN_HIT_PCT = "0"
 # Optional short mode: lets https://worker/dl/<id>/<name> map to this backend URL.
 # ORIGIN_URL = "https://api.example.com"
 
@@ -39,3 +47,7 @@ class_name = "LogHub"
 [[migrations]]
 tag = "v1"
 new_sqlite_classes = ["LogHub"]
+
+# Health check + Telegram alerts every 5 minutes (needs the LOGS Durable Object above).
+[triggers]
+crons = ["*/5 * * * *"]

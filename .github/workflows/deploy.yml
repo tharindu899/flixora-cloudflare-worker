@@ -15,15 +15,28 @@ jobs:
           node-version: 22
       - run: npm install
       - run: npm test
+      - name: Pick the secrets that are set (Telegram ones are optional)
+        id: sec
+        env:
+          TG_BOT_TOKEN: ${{ secrets.TG_BOT_TOKEN }}
+          TG_CHAT_ID: ${{ secrets.TG_CHAT_ID }}
+        run: |
+          {
+            echo "list<<EOF"
+            echo "TURNSTILE_SECRET"
+            echo "UI_USER"
+            echo "UI_PASS"
+            if [ -n "$TG_BOT_TOKEN" ] && [ -n "$TG_CHAT_ID" ]; then echo "TG_BOT_TOKEN"; echo "TG_CHAT_ID"; fi
+            echo "EOF"
+          } >> "$GITHUB_OUTPUT"
       - uses: cloudflare/wrangler-action@v3
         with:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-          secrets: |
-            TURNSTILE_SECRET
-            UI_USER
-            UI_PASS
+          secrets: ${{ steps.sec.outputs.list }}
         env:
           TURNSTILE_SECRET: ${{ secrets.TURNSTILE_SECRET }}
           UI_USER: ${{ secrets.UI_USER }}
           UI_PASS: ${{ secrets.UI_PASS }}
+          TG_BOT_TOKEN: ${{ secrets.TG_BOT_TOKEN }}
+          TG_CHAT_ID: ${{ secrets.TG_CHAT_ID }}

@@ -5,3 +5,6 @@ UI_USER=
 UI_PASS=
 # optional: signs the session cookie (default: derived from UI_USER + UI_PASS)
 # SESSION_SECRET=
+# Telegram alerts (backend down, error spikes): bot token from @BotFather and your chat id
+TG_BOT_TOKEN=
+TG_CHAT_ID=

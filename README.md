@@ -97,6 +97,20 @@ sidebar + topbar, පිටු 4ක් (`#overview`, `#log`, `#test`, `#setup`).
 `/health` තාමත් JSON. Fonts (Inter, IBM Plex Mono) සහ Font Awesome load වෙන්නේ Google Fonts / cdnjs වලින්,
 CSP එකේ ඒ hosts දෙක විතරක් allow කරලා තියෙනවා.
 
+## Stats, alerts, purge (UI)
+
+- **Overview** cards: Backend (VPS) up/down + ms, **Saved today** (bytes served from the edge instead of the VPS), From VPS today, Requests today.
+- **Stats** page: 7-day totals, 14-day chart (edge vs VPS), daily table, top files. Totals are kept 31 days in the Durable Object
+  (memory mode resets on restart). Day boundary = `STATS_TZ_MIN` (default 330 = Sri Lanka).
+- **Telegram alerts**: secrets `TG_BOT_TOKEN` (from @BotFather) + `TG_CHAT_ID` (GitHub Actions secrets, same way as `UI_USER`; optional - deploy works without them).
+  A cron trigger (`[triggers]` in `wrangler.toml`, every 5 min) pings every host in `ALLOWED_ORIGINS` and sends a message when the backend is
+  down (2 failed checks in a row) and when it is back, when `ALERT_ERRORS` (default 5) streams/downloads fail within 10 min, and, if
+  `ALERT_MIN_HIT_PCT` > 0, when today's chunk hit rate is below that. Needs the `LOGS` Durable Object. Setup page -> "send test alert" checks the bot.
+- **Purge cache**: Link tester -> paste a link -> purge cache (tap twice). Deletes that file's cached chunks. Cloudflare's edge cache is per data center,
+  so this clears the location that serves you; other locations just expire (`CACHE_TTL`).
+- **Country block**: `BLOCK_COUNTRIES = "CN,RU"` in `wrangler.toml` (or as a variable). Only proxy traffic is blocked, never the UI login.
+- **Light / dark** toggle in the sidebar (remembered in the browser).
+
 ## Live log
 
 UI එකේ **Live log** panel එක: play / download වෙන හැම file එකකම නම, size, progress, speed (now / avg / peak),

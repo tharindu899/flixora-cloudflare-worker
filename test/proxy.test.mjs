@@ -54,6 +54,9 @@ globalThis.caches = {
       const k = typeof key === "string" ? key : key.url;
       store.set(k, { buf: new Uint8Array(await resp.arrayBuffer()), headers: [...resp.headers] });
     },
+    async delete(key) {
+      return store.delete(typeof key === "string" ? key : key.url);
+    },
   },
 };
 
@@ -358,4 +361,171 @@ test("Durable Object mode: LogHub stores events and the worker reads them back",
   assert.equal(d.entries[0].state, "done");
   assert.ok(d.entries[0].sent > 0);
   assert.ok(kv.get("entries").length === 1, "persisted to DO storage");
+});
+
+// ---------------------------------------------------------------- stats, alerts, purge, country block
+const { addDaily, statsView, dayKey } = await import("../src/log.js");
+const { evaluate, pingBackends, alertConfig } = await import("../src/alerts.js");
+
+const tgSent = [];
+{
+  const inner = globalThis.fetch;
+  globalThis.fetch = async (url, init) => {
+    if (String(url).startsWith("https://api.telegram.org/")) {
+      tgSent.push({ url: String(url), ...JSON.parse(init.body) });
+      return new Response("{}", { status: 200 });
+    }
+    return inner(url, init);
+  };
+}
+const postJson = (path, payload, env = LOGENV) =>
+  call(path, { env, method: "POST", headers: { cookie: AUTH, "content-type": "application/json" }, payload: JSON.stringify(payload) });
+const jsonOf = (r) => JSON.parse(new TextDecoder().decode(r.body));
+
+test("daily stats: bytes, edge vs VPS bytes, errors, top files, day key follows the timezone", () => {
+  const days = {};
+  const now = Date.UTC(2026, 9, 27, 20, 0, 0); // 27 Oct 20:00 UTC = 28 Oct 01:30 in Colombo
+  assert.equal(dayKey(now, 330), "2026-10-28");
+  assert.equal(dayKey(now, 0), "2026-10-27");
+  addDaily(days, { type: "progress", sent: 5 }, now);
+  addDaily(days, { type: "end", name: "a.mkv", sent: 1000, hb: 700, mb: 300, h: 7, m: 3, state: "done" }, now);
+  addDaily(days, { type: "end", name: "a.mkv", sent: 500, hb: 0, mb: 500, h: 0, m: 5, state: "error" }, now);
+  addDaily(days, { type: "end", name: "b.mkv", sent: 10, hb: 10, mb: 0, h: 1, m: 0, state: "done" }, now);
+  const d = days["2026-10-28"];
+  assert.deepEqual([d.r, d.b, d.hb, d.mb, d.h, d.m, d.e], [3, 1510, 710, 800, 8, 8, 1]);
+  assert.deepEqual(d.f["a.mkv"], [1500, 2]);
+  assert.equal(statsView(days, now).today, "2026-10-28");
+  // only the newest 31 days are kept
+  for (let i = 0; i < 40; i++) addDaily(days, { type: "end", sent: 1 }, now - (i + 1) * 86400000);
+  assert.equal(Object.keys(days).length, 31);
+});
+
+test("a replay is served from the edge and shows up as saved bytes in the log and in /stats.json", async () => {
+  resetAll();
+  await call("/logs/clear", { env: LOGENV, method: "POST", headers: { cookie: AUTH } });
+  const range = { Range: "bytes=0-2097151" };
+  await call(plain(), { env: LOGENV, headers: { ...range, "user-agent": "VLC/3.0 (Android)" } });
+  await call(plain(), { env: LOGENV, headers: { ...range, "user-agent": "VLC/3.0 (Android)" } });
+  const log = jsonOf(await getLog());
+  const e = log.entries[0];
+  assert.equal(e.hit_bytes, 2 * MIB);
+  assert.equal(e.miss_bytes, 2 * MIB);
+  const st = jsonOf(await call("/stats.json", { env: LOGENV, headers: { cookie: AUTH } }));
+  const today = st.days.find((x) => x.d === st.today);
+  assert.ok(today.hb >= 2 * MIB && today.mb >= 2 * MIB);
+  assert.ok(today.f["movie.mkv"][0] >= 4 * MIB);
+  assert.equal((await call("/stats.json", { env: LOGENV })).res.status, 401);
+});
+
+test("/status.json pings the backend and reports alert config (login required)", async () => {
+  assert.equal((await call("/status.json", { env: LOGENV })).res.status, 401);
+  const env = { ...LOGENV, TG_BOT_TOKEN: "t", TG_CHAT_ID: "1", BLOCK_COUNTRIES: "cn, ru", ALERT_MIN_HIT_PCT: "30" };
+  const s = jsonOf(await call("/status.json", { env, headers: { cookie: AUTH } }));
+  assert.equal(s.backend.up, true);
+  assert.equal(s.backend.host, HOST);
+  assert.equal(s.telegram, true);
+  assert.equal(s.alert_min_hit, 30);
+  assert.deepEqual(s.blocked_countries.sort(), ["CN", "RU"]);
+  const down = jsonOf(await call("/status.json", { env: { ...LOGENV, ALLOWED_ORIGINS: "down.example.com" }, headers: { cookie: AUTH } }));
+  assert.equal(down.backend.up, false);
+});
+
+test("alert rules: down after 2 failed checks, recovery, error spike, low hit rate (each with a cooldown)", () => {
+  const cfg = { errCount: 3, minHit: 40 };
+  const t = 1_000_000_000_000;
+  const bad = { up: false, host: "api", ms: 8000, error: "timeout" };
+  const good = { up: true, host: "api", ms: 120, error: "" };
+  let r = evaluate(null, { ping: bad, now: t, cfg });
+  assert.equal(r.messages.length, 0); // one failure is not enough
+  r = evaluate(r.state, { ping: bad, now: t + 300000, cfg });
+  assert.match(r.messages[0], /DOWN/);
+  r = evaluate(r.state, { ping: bad, now: t + 600000, cfg });
+  assert.equal(r.messages.length, 0); // no repeat
+  r = evaluate(r.state, { ping: good, now: t + 900000, cfg });
+  assert.match(r.messages[0], /back up/);
+  assert.match(r.messages[0], /10 min/);
+
+  const errs = [t - 1000, t - 2000, t - 3000, t - 20 * 60000];
+  r = evaluate(null, { ping: good, now: t, errTimes: errs, cfg });
+  assert.match(r.messages[0], /3 failed/);
+  r = evaluate(r.state, { ping: good, now: t + 60000, errTimes: errs, cfg });
+  assert.equal(r.messages.length, 0); // cooldown
+
+  r = evaluate(null, { ping: good, now: t, today: { h: 100, m: 400, mb: 5 * MIB }, cfg });
+  assert.match(r.messages[0], /20%/);
+  r = evaluate(null, { ping: good, now: t, today: { h: 10, m: 40 }, cfg });
+  assert.equal(r.messages.length, 0); // too little data
+  assert.deepEqual(alertConfig({}), { errCount: 5, minHit: 0 });
+});
+
+test("scheduled check: Durable Object remembers state, Telegram gets the DOWN and the recovery message", async () => {
+  tgSent.length = 0;
+  const kv = new Map();
+  const hub = new LogHub({
+    storage: { get: async (k) => kv.get(k), put: async (k, v) => kv.set(k, structuredClone(v)) },
+    blockConcurrencyWhile: (fn) => fn(),
+  });
+  const LOGS = { idFromName: (n) => n, get: () => ({ fetch: (u, init) => hub.fetch(new Request(u, init)) }) };
+  const base = { ...LOGENV, LOGS, TG_BOT_TOKEN: "tok", TG_CHAT_ID: "42" };
+  const run = (env) => {
+    const waits = [];
+    return worker.scheduled({}, env, { waitUntil: (p) => waits.push(p) }).then(() => Promise.all(waits));
+  };
+  const downEnv = { ...base, ALLOWED_ORIGINS: "down.example.com" };
+  await run(downEnv);
+  assert.equal(tgSent.length, 0);
+  await run(downEnv);
+  assert.equal(tgSent.length, 1);
+  assert.match(tgSent[0].text, /DOWN/);
+  assert.equal(tgSent[0].chat_id, "42");
+  assert.match(tgSent[0].url, /bottok\/sendMessage/);
+  await run(downEnv);
+  assert.equal(tgSent.length, 1);
+  await run(base);
+  assert.equal(tgSent.length, 2);
+  assert.match(tgSent[1].text, /back up/);
+  assert.ok(kv.get("alert"));
+});
+
+test("Telegram test button needs the secrets and a login", async () => {
+  tgSent.length = 0;
+  assert.equal((await call("/alerts/test", { env: LOGENV, method: "POST" })).res.status, 401);
+  assert.equal((await postJson("/alerts/test", {})).res.status, 400);
+  const r = await postJson("/alerts/test", {}, { ...LOGENV, TG_BOT_TOKEN: "tok", TG_CHAT_ID: "42" });
+  assert.equal(r.res.status, 200);
+  assert.equal(tgSent.length, 1);
+});
+
+test("purge removes every cached chunk of a file (works with a backend link or a proxy link)", async () => {
+  resetAll();
+  await call(plain(), { env: LOGENV, headers: { Range: "bytes=0-" } }); // caches MAX_CHUNKS=3 chunks
+  const countFile = () => [...store.keys()].filter((k) => k.includes(`/${FILE_ID}`)).length;
+  assert.ok(countFile() >= 4); // meta + chunks
+  assert.equal((await call("/purge", { env: LOGENV, method: "POST", headers: { "content-type": "application/json" }, payload: "{}" })).res.status, 401);
+  assert.equal((await postJson("/purge", { url: "" })).res.status, 400);
+  assert.equal((await postJson("/purge", { url: "https://evil.example.com/dl/x/y.mkv" })).res.status, 403);
+  const r = await postJson("/purge", { url: `https://${HOST}/dl/${FILE_ID}/movie.mkv` });
+  const d = jsonOf(r);
+  assert.equal(d.total, 6);
+  assert.equal(d.next, null);
+  assert.ok(d.deleted >= 3);
+  assert.equal(countFile(), 0);
+  // same through the proxy link
+  await call(plain(), { env: LOGENV, headers: { Range: "bytes=0-" } });
+  const d2 = jsonOf(await postJson("/purge", { url: `https://stream.example.org${plain()}` }));
+  assert.equal(d2.next, null);
+  assert.equal(countFile(), 0);
+  originCalls = [];
+  const again = await call(plain(), { env: LOGENV, headers: { Range: "bytes=0-10" } });
+  assert.equal(again.res.headers.get("x-flx-cache"), "MISS");
+});
+
+test("BLOCK_COUNTRIES blocks proxy traffic but never the UI or login", async () => {
+  resetAll();
+  const env = { ...LOGENV, BLOCK_COUNTRIES: "CN, ru" };
+  assert.equal((await call(plain(), { env, headers: { "cf-ipcountry": "CN", Range: "bytes=0-9" } })).res.status, 403);
+  assert.equal((await call(plain(), { env, headers: { "cf-ipcountry": "ru", Range: "bytes=0-9" } })).res.status, 403);
+  assert.equal((await call(plain(), { env, headers: { "cf-ipcountry": "LK", Range: "bytes=0-9" } })).res.status, 206);
+  assert.equal((await call("/ui", { env, headers: { "cf-ipcountry": "CN" } })).res.status, 200);
+  assert.equal((await login(env)).res.status, 200);
 });

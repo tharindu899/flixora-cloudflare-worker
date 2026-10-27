@@ -16,7 +16,8 @@
 import { UI_HTML } from "./ui.js";
 import { loginHtml } from "./login.js";
 import { authConfigured, checkLogin, isAuthed, sessionCookie, clearCookie } from "./auth.js";
-import { applyEvent, snapshot, uaLabel, memEntries } from "./log.js";
+import { applyEvent, snapshot, uaLabel, memEntries, memDays, memErrs, addDaily, noteError, statsView } from "./log.js";
+import { alertConfig, pingBackends, sendTelegram, telegramReady } from "./alerts.js";
 
 export { LogHub } from "./log.js";
 
@@ -44,6 +45,15 @@ const num = (v, d) => {
 };
 const flag = (v, d) => (v === undefined || v === null || v === "" ? d : /^(1|true|yes|on)$/i.test(String(v)));
 
+function countrySet(v) {
+  return new Set(
+    String(v || "")
+      .split(/[\s,]+/)
+      .map((x) => x.trim().toUpperCase())
+      .filter((x) => /^[A-Z]{2}$/.test(x))
+  );
+}
+
 function readConfig(env, hostname) {
   const chunkMB = Math.min(32, Math.max(1, Math.floor(num(env.CHUNK_MB, 4))));
   const cacheMode = String(env.ENABLE_CACHE || "auto").toLowerCase();
@@ -65,6 +75,7 @@ function readConfig(env, hostname) {
         .filter(Boolean)
     ),
     cacheOn,
+    blocked: countrySet(env.BLOCK_COUNTRIES),
   };
 }
 
@@ -126,6 +137,8 @@ async function verifyDownloadToken(secret, fileId, token) {
 }
 
 // ---------------------------------------------------------------- activity log helpers
+
+const statsOffset = (env) => (Number.isFinite(Number(env.STATS_TZ_MIN)) && env.STATS_TZ_MIN !== "" && env.STATS_TZ_MIN != null ? Number(env.STATS_TZ_MIN) : 330);
 
 async function makeLogCtx(request, parsed) {
   const ip = request.headers.get("cf-connecting-ip") || "";
@@ -561,7 +574,13 @@ async function serve(request, ctx, c, parsed, reqUrl, env) {
     ev.sid = logCtx.sid;
     ev.rid = rid;
     try {
-      if (!env.LOGS) return applyEvent(memEntries, ev, Date.now());
+      if (!env.LOGS) {
+        const now = Date.now();
+        applyEvent(memEntries, ev, now);
+        addDaily(memDays, ev, now, statsOffset(env));
+        noteError(memErrs, ev, now);
+        return;
+      }
       if (budget.logLeft < (final ? 1 : 2)) return; // always keep one call for the final event
       budget.logLeft--;
       const stub = env.LOGS.get(env.LOGS.idFromName("main"));
@@ -584,11 +603,13 @@ async function serve(request, ctx, c, parsed, reqUrl, env) {
     let nextP = null;
     let hits = 0;
     let misses = 0;
+    let hitBytes = 0;
+    let missBytes = 0;
     let nextReportAt = 3000; // progress events at ~3s, 6.6s, 14s, 32s ... (few subrequests)
     const report = (type, state, err) => {
       const ms = Date.now() - t0;
       const sent = Math.max(0, pos - start);
-      send({ type, state, err, sent, ms, h: hits, m: misses, bps: ms > 0 ? Math.round((sent * 1000) / ms) : 0 }, type === "end");
+      send({ type, state, err, sent, ms, h: hits, m: misses, hb: hitBytes, mb: missBytes, name: parsed.name, bps: ms > 0 ? Math.round((sent * 1000) / ms) : 0 }, type === "end");
     };
     try {
       while (pos <= end) {
@@ -627,8 +648,13 @@ async function serve(request, ctx, c, parsed, reqUrl, env) {
         await body.pipeTo(writable, { preventClose: true });
         pos += take;
         idx++;
-        if (src.hit) hits++;
-        else misses++;
+        if (src.hit) {
+          hits++;
+          hitBytes += take;
+        } else {
+          misses++;
+          missBytes += take;
+        }
         src = null;
         if (Date.now() - t0 >= nextReportAt) {
           report("progress");
@@ -657,6 +683,79 @@ async function serve(request, ctx, c, parsed, reqUrl, env) {
   return new Response(readable, { status: partial ? 206 : 200, headers });
 }
 
+// ---------------------------------------------------------------- cache purge
+
+const PURGE_BATCH = 40; // cache.delete counts as a subrequest (Free: 50)
+
+/**
+ * POST /purge {url, from}: deletes the cached chunks of one file, PURGE_BATCH per call.
+ * The UI repeats the call with the returned `next` until it is null.
+ * Cache API is per data center: only the location that served this request is cleared.
+ */
+async function purgeCache(request, env, c, url, plain) {
+  let body;
+  try {
+    const text = await request.text();
+    if (text.length > 4096) throw new Error("too big");
+    body = JSON.parse(text);
+  } catch (_) {
+    return jsonError(400, "Bad request");
+  }
+  const raw = String(body?.url ?? "").trim();
+  if (!raw) return jsonError(400, "Paste a link first");
+  if (!c.allowed.size) return jsonError(500, "ALLOWED_ORIGINS is not configured");
+  let parsed;
+  try {
+    let u;
+    try {
+      u = new URL(raw);
+    } catch (_) {
+      u = null;
+    }
+    const asProxy = u && u.origin === url.origin ? u : new URL(`${url.origin}/${raw}`);
+    parsed = parseTarget(asProxy, c);
+  } catch (e) {
+    if (e instanceof HttpError) return jsonError(e.status, e.message);
+    return jsonError(400, "Bad link");
+  }
+  if (!parsed) return jsonError(400, "Not a /dl or /dld link");
+
+  const cache = caches.default;
+  const base = url.origin;
+  const metaKey = `${base}/__flx/m/${parsed.id}`;
+  let size = 0;
+  try {
+    const m = await cache.match(metaKey);
+    if (m) size = Number((await m.json()).size) || 0;
+  } catch (_) {
+    /* no metadata */
+  }
+  const total = size ? Math.ceil(size / c.chunk) : 0;
+  const from = Math.max(0, Math.floor(Number(body?.from) || 0));
+  const to = Math.min(total, from + PURGE_BATCH);
+  const jobs = [];
+  for (let i = from; i < to; i++) jobs.push(cache.delete(`${base}/__flx/c/${parsed.id}/${c.chunkMB}/${i}`).catch(() => false));
+  const deleted = (await Promise.all(jobs)).filter(Boolean).length;
+  const done = to >= total;
+  if (done) await cache.delete(metaKey).catch(() => false);
+  return plain({ ok: true, name: parsed.name, deleted, total, next: done ? null : to });
+}
+
+// ---------------------------------------------------------------- scheduled alert check
+
+async function runChecks(env) {
+  const ping = await pingBackends(env);
+  if (!env.LOGS) return; // alert state needs the Durable Object
+  try {
+    const stub = env.LOGS.get(env.LOGS.idFromName("main"));
+    const r = await stub.fetch("https://log/alerts", { method: "POST", body: JSON.stringify({ ping, cfg: alertConfig(env) }) });
+    const d = await r.json();
+    for (const m of d.messages || []) await sendTelegram(env, m);
+  } catch (_) {
+    /* next run will try again */
+  }
+}
+
 // ---------------------------------------------------------------- entry
 
 async function handle(request, env, ctx) {
@@ -670,7 +769,7 @@ async function handle(request, env, ctx) {
     h.set("Access-Control-Max-Age", "86400");
     return new Response(null, { status: 204, headers: h });
   }
-  const isPostRoute = request.method === "POST" && ["/logs/clear", "/login", "/logout"].includes(url.pathname);
+  const isPostRoute = request.method === "POST" && ["/logs/clear", "/login", "/logout", "/purge", "/alerts/test"].includes(url.pathname);
   if (request.method !== "GET" && request.method !== "HEAD" && !isPostRoute) return jsonError(405, "Method not allowed");
   const secure = url.protocol === "https:";
 
@@ -729,6 +828,7 @@ async function handle(request, env, ctx) {
         backend_turnstile: c.backendTurnstile,
         download_token_check: Boolean(env.TURNSTILE_SECRET),
         origins: c.allowed.size,
+        blocked_countries: c.blocked.size,
         note: c.allowed.size ? undefined : "ALLOWED_ORIGINS is not configured",
       }),
       { headers: withCors(new Headers({ "Content-Type": "application/json", "Cache-Control": "no-store" })) }
@@ -756,6 +856,46 @@ async function handle(request, env, ctx) {
     } catch (_) {
       return jsonError(502, "Log store unavailable");
     }
+  }
+
+  if (["/status.json", "/stats.json", "/purge", "/alerts/test"].includes(url.pathname)) {
+    if (!authConfigured(env)) return jsonError(403, "UI_USER / UI_PASS are not set on the worker");
+    if (!(await isAuthed(request, env))) return jsonError(401, "Sign in required");
+    const plain = (obj, status = 200) =>
+      new Response(JSON.stringify(obj), { status, headers: { "Content-Type": "application/json", "Cache-Control": "no-store" } });
+    const stub = env.LOGS ? env.LOGS.get(env.LOGS.idFromName("main")) : null;
+
+    if (url.pathname === "/status.json") {
+      const cfg = alertConfig(env);
+      return plain({
+        backend: await pingBackends(env),
+        telegram: telegramReady(env),
+        alerts_need_do: !env.LOGS,
+        alert_errors: cfg.errCount,
+        alert_min_hit: cfg.minHit,
+        blocked_countries: [...countrySet(env.BLOCK_COUNTRIES)],
+      });
+    }
+    if (url.pathname === "/stats.json") {
+      try {
+        if (stub) return plain({ mode: "durable", ...(await (await stub.fetch("https://log/stats")).json()) });
+        return plain({ mode: "memory", ...statsView(memDays, Date.now(), statsOffset(env)) });
+      } catch (_) {
+        return jsonError(502, "Stats store unavailable");
+      }
+    }
+    if (request.method !== "POST") return jsonError(405, "Use POST");
+    if (url.pathname === "/alerts/test") {
+      if (!telegramReady(env)) return jsonError(400, "TG_BOT_TOKEN / TG_CHAT_ID are not set on the worker");
+      const ok = await sendTelegram(env, "✅ Flixora proxy: test alert. Telegram alerts are working.");
+      return ok ? plain({ ok: true }) : jsonError(502, "Telegram rejected the message (check token and chat id)");
+    }
+    return purgeCache(request, env, c, url, plain);
+  }
+
+  if (c.blocked.size) {
+    const country = String(request.cf?.country || request.headers.get("cf-ipcountry") || "").toUpperCase();
+    if (country && c.blocked.has(country)) return jsonError(403, "Not available in your region");
   }
 
   if (!c.allowed.size) return jsonError(500, "ALLOWED_ORIGINS is not configured");
@@ -786,6 +926,9 @@ async function handle(request, env, ctx) {
 }
 
 export default {
+  async scheduled(event, env, ctx) {
+    ctx.waitUntil(runChecks(env));
+  },
   async fetch(request, env, ctx) {
     try {
       return await handle(request, env, ctx);

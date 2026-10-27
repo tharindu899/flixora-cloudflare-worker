@@ -24,6 +24,15 @@ export const UI_HTML = String.raw`<!doctype html>
   --font-mono:'IBM Plex Mono',ui-monospace,SFMono-Regular,Menlo,monospace;
   --font-sans:'Inter',system-ui,-apple-system,sans-serif;--radius:8px;
 }
+html[data-theme=light]{
+  --bg:#F4F5FA;--panel:#FFFFFF;--panel-raised:#ECEEF6;--border:#D6D9E6;--text:#1F2030;--text-dim:#474A63;--text-faint:#767B99;
+  --state-idle:#8A8FAA;--state-running:#B96300;--state-success:#17913F;--state-error:#D0342C;
+  --link:#0B7597;--accent-purple:#7342D1;--accent-pink:#BE2E8A;--accent-yellow:#7D6F00;--term-bg:#F0F2F9;
+}
+html[data-theme=light] .nav-item.active .nav-icon{background:rgba(0,0,0,.06)}
+html[data-theme=light] .term-block-header{background:rgba(0,0,0,.03)}
+html[data-theme=light] .topbar{box-shadow:0 2px 10px rgba(0,0,0,.06)}
+html[data-theme=light] .act-btn.on{background:rgba(11,117,151,.08)}
 *{box-sizing:border-box}
 html,body{height:100%;margin:0}
 body{background:var(--bg);color:var(--text);font-family:var(--font-sans);-webkit-font-smoothing:antialiased;font-size:14px}
@@ -133,7 +142,7 @@ table.data-table tr:last-child td{border-bottom:none}
 .tag-pill{display:inline-flex;align-items:center;padding:2px 9px;border-radius:20px;font-size:11px;font-family:var(--font-mono)}
 
 /* terminal blocks */
-.term-block{background:#14151C;border:1px solid var(--border);border-radius:var(--radius);overflow:hidden}
+.term-block{background:var(--term-bg,#14151C);border:1px solid var(--border);border-radius:var(--radius);overflow:hidden}
 .term-block-header{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:7px 12px;background:rgba(255,255,255,.02);
   border-bottom:1px solid var(--border);font-family:var(--font-mono);font-size:10.5px;letter-spacing:.04em;color:var(--text-faint)}
 .term-block-btn{display:inline-flex;align-items:center;gap:5px;background:transparent;border:none;color:var(--text-faint);font-family:var(--font-mono);font-size:10.5px;cursor:pointer;padding:2px}
@@ -148,6 +157,15 @@ table.data-table tr:last-child td{border-bottom:none}
 .flow{display:flex;flex-wrap:wrap;gap:8px;align-items:center;font-family:var(--font-mono);font-size:12px}
 .node{background:var(--panel-raised);border:1px solid var(--border);border-radius:8px;padding:8px 12px}
 .lock{margin-bottom:14px}
+.dbars{display:flex;align-items:flex-end;gap:5px;height:130px;margin:6px 0 4px}
+.dbar{flex:1;min-width:0;height:100%;display:flex;flex-direction:column;justify-content:flex-end;position:relative}
+.dbar i{display:block;width:100%}
+.dbar .e{background:var(--accent-purple);border-radius:3px 3px 0 0}
+.dbar .v{background:var(--state-running)}
+.dlabels{display:flex;gap:5px;font-family:var(--font-mono);font-size:9.5px;color:var(--text-faint)}
+.dlabels span{flex:1;min-width:0;text-align:center;overflow:visible;white-space:nowrap}
+.leg{display:flex;gap:14px;flex-wrap:wrap;margin-top:8px;font-size:11px;color:var(--text-dim)}
+.leg b{display:inline-block;width:9px;height:9px;border-radius:2px;margin-right:6px}
 .hide{display:none!important}
 .toast{position:fixed;left:50%;bottom:calc(22px + env(safe-area-inset-bottom,0px));transform:translate(-50%,30px);background:var(--accent-purple);color:#1a1b26;
   font-weight:600;padding:8px 16px;border-radius:10px;opacity:0;transition:.25s;pointer-events:none;z-index:99;font-size:13px}
@@ -155,8 +173,8 @@ table.data-table tr:last-child td{border-bottom:none}
 
 @media (max-width:720px){
   .hamburger-btn{display:flex}
-  .sidebar{position:fixed;top:0;left:0;height:100dvh;z-index:50;width:250px;transform:translateX(-100%);transition:transform .25s ease;box-shadow:8px 0 24px rgba(0,0,0,.4)}
-  .sidebar.open{transform:translateX(0)}
+  .sidebar{position:fixed;top:0;left:0;height:100dvh;z-index:50;width:250px;transform:translateX(-100%);transition:transform .25s ease}
+  .sidebar.open{transform:translateX(0);box-shadow:8px 0 24px rgba(0,0,0,.4)}
   .sidebar-close-btn{display:flex;align-items:center;justify-content:center;width:28px;height:28px;border-radius:7px;border:1px solid var(--border);
     background:transparent;color:var(--text-dim);cursor:pointer;margin-left:auto}
   .content-pad{padding:16px 14px 50px}
@@ -196,6 +214,7 @@ table.data-table tr:last-child td{border-bottom:none}
         <div style="min-width:0"><div class="t" id="sideHost"></div>
           <div class="s" id="sideState"><span class="dot" style="background:var(--state-idle)"></span>checking</div></div>
       </div>
+      <button class="act-btn" id="theme" style="width:100%;justify-content:center;margin-bottom:8px"><i class="fa-solid fa-circle-half-stroke"></i><span id="themeTxt">light mode</span></button>
       <button class="act-btn" id="signOut" style="width:100%;justify-content:center"><i class="fa-solid fa-right-from-bracket"></i>sign out</button>
     </div>
   </aside>
@@ -215,6 +234,7 @@ table.data-table tr:last-child td{border-bottom:none}
       <!-- ================= Overview ================= -->
       <div class="page" id="p-overview">
         <div class="stat-grid" id="cards"></div>
+        <div class="stat-grid" id="cards2"></div>
         <div class="mig-warn hide" id="healthNote"></div>
         <div class="chart-grid">
           <div class="chart-card">
@@ -225,7 +245,7 @@ table.data-table tr:last-child td{border-bottom:none}
           <div class="chart-card">
             <div class="chart-card-title">Cache hit rate</div>
             <div class="chart-card-sub" id="donutSub">Chunks served from the edge vs the VPS</div>
-            <div style="display:flex;justify-content:center" id="donut"></div>
+            <div style="display:flex;flex-direction:column;align-items:center" id="donut"></div>
           </div>
         </div>
         <div class="stat-grid" id="logCards"></div>
@@ -243,6 +263,19 @@ table.data-table tr:last-child td{border-bottom:none}
         </div>
         <div class="card" id="logCard"><div class="empty">loading&hellip;</div></div>
         <div class="hint" id="logMode"></div>
+      </div>
+
+      <!-- ================= Stats ================= -->
+      <div class="page hide" id="p-stats">
+        <div class="stat-grid" id="statCards"></div>
+        <div class="chart-card" style="margin-bottom:14px">
+          <div class="chart-card-title">Last 14 days</div>
+          <div class="chart-card-sub">Data sent to viewers: from the edge cache vs from your VPS</div>
+          <div id="dayChart"></div>
+        </div>
+        <div class="card" style="margin-bottom:14px" id="dayCard"><div class="empty">loading&hellip;</div></div>
+        <div class="card" id="topCard"></div>
+        <div class="hint" id="statsMode"></div>
       </div>
 
       <!-- ================= Link tester ================= -->
@@ -266,7 +299,10 @@ table.data-table tr:last-child td{border-bottom:none}
             <button class="mig-primary" id="tHead"><i class="fa-solid fa-satellite-dish"></i>HEAD test</button>
             <button class="run-btn" id="tRange"><i class="fa-solid fa-arrows-left-right"></i>Range 0-0</button>
             <button class="act-btn" id="tOpen"><i class="fa-solid fa-arrow-up-right-from-square"></i>open</button>
+            <span class="grow"></span>
+            <button class="act-btn danger" id="tPurge"><i class="fa-solid fa-broom"></i>purge cache</button>
           </div>
+          <div class="hint">Purge deletes this file's cached chunks (e.g. after re-uploading it). The edge cache is per data center: this clears the location serving you; other locations expire on their own.</div>
           <div id="res"></div>
           <div class="hint mono" id="hist"></div>
         </div>
@@ -301,6 +337,9 @@ table.data-table tr:last-child td{border-bottom:none}
             <tr><td data-label="header"><span class="tag-pill" style="background:rgba(255,85,85,.15);color:var(--state-error)">BYPASS</span></td><td data-label="meaning">passed straight through (subtitles, odd ranges)</td></tr>
           </tbody></table>
         </div>
+        <div class="card" style="margin-bottom:14px"><div class="pad" style="padding-bottom:4px"><div class="mig-title"><i class="fa-brands fa-telegram" style="color:var(--link)"></i>alerts &amp; protection</div></div>
+          <table class="data-table"><tbody id="alertRows"></tbody></table>
+          <div class="pad" style="padding-top:12px"><button class="act-btn" id="tgTest"><i class="fa-solid fa-paper-plane"></i>send test alert</button></div></div>
         <div class="card"><div class="pad" style="padding-bottom:4px"><div class="mig-title"><i class="fa-solid fa-sliders" style="color:var(--accent-yellow)"></i>configuration</div></div>
           <table class="data-table"><tbody id="cfg"></tbody></table></div>
       </div>
@@ -319,6 +358,7 @@ table.data-table tr:last-child td{border-bottom:none}
   var NAV = [
     { id: "overview", label: "Overview", sub: "Live snapshot of the proxy", icon: "fa-solid fa-gauge-high", color: "link" },
     { id: "log", label: "Live log", sub: "Who plays and downloads what, and how fast", icon: "fa-solid fa-list-ul", color: "green" },
+    { id: "stats", label: "Stats", sub: "Daily traffic and what the edge cache saved", icon: "fa-solid fa-chart-column", color: "purple" },
     { id: "test", label: "Link tester", sub: "Check a backend link through this worker", icon: "fa-solid fa-flask", color: "pink" },
     { id: "setup", label: "Setup", sub: "Endpoints, cache headers and configuration", icon: "fa-solid fa-gear", color: "orange" }
   ];
@@ -368,6 +408,20 @@ table.data-table tr:last-child td{border-bottom:none}
       (pct != null ? '<div class="bar-track"><div class="bar-fill" style="width:' + pct + "%;background:" + barColor(pct) + '"></div></div>' :
         sub ? '<div class="stat-sub">' + esc(sub) + "</div>" : "") + "</div>";
   }
+
+  /* ---------------- theme ---------------- */
+  function applyTheme(t) {
+    document.documentElement.setAttribute("data-theme", t);
+    $("themeTxt").textContent = t === "light" ? "dark mode" : "light mode";
+    var m = document.querySelector('meta[name=theme-color]'); if (m) m.setAttribute("content", t === "light" ? "#F4F5FA" : "#282A36");
+  }
+  var theme = "dark";
+  try { theme = localStorage.getItem("flx-theme") === "light" ? "light" : "dark"; } catch (e) {}
+  applyTheme(theme);
+  $("theme").onclick = function () {
+    theme = theme === "light" ? "dark" : "light"; applyTheme(theme);
+    try { localStorage.setItem("flx-theme", theme); } catch (e) {}
+  };
 
   /* ---------------- shell: nav, routing, clock ---------------- */
   $("sideHost").textContent = location.host;
@@ -447,21 +501,22 @@ table.data-table tr:last-child td{border-bottom:none}
     var step = (W - P * 2) / (vals.length - 1 || 1);
     var pts = vals.map(function (v, i) { return (P + i * step) + "," + (P + (1 - v / max) * (H - P * 2)); });
     var area = "M " + P + "," + (H - P) + " " + vals.map(function (v, i) { return "L " + (P + i * step) + "," + (P + (1 - v / max) * (H - P * 2)); }).join(" ") + " L " + (P + (vals.length - 1) * step) + "," + (H - P) + " Z";
-    var grid = [0, 0.25, 0.5, 0.75, 1].map(function (f) {
+    var grid = "", labels = "";
+    [0, 0.25, 0.5, 0.75, 1].forEach(function (f) {
       var y = P + (1 - f) * (H - P * 2);
-      return '<line x1="' + P + '" y1="' + y + '" x2="' + (W - P) + '" y2="' + y + '" stroke="var(--border)"/>' +
-        '<text x="2" y="' + (y - 2) + '" font-size="9" fill="var(--text-faint)" font-family="IBM Plex Mono,monospace">' + spd(f * max) + "</text>";
-    }).join("");
-    $("chart").innerHTML = '<svg viewBox="0 0 ' + W + " " + H + '" style="width:100%;height:' + H + 'px" preserveAspectRatio="none">' + grid +
-      '<path d="' + area + '" fill="#50FA7B" opacity="0.12"/><polyline points="' + pts.join(" ") + '" fill="none" stroke="#50FA7B" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/></svg>' +
-      '<div style="display:flex;gap:6px;align-items:center;margin-top:6px;font-size:11px;color:var(--text-dim)"><span style="width:9px;height:9px;border-radius:2px;background:#50FA7B;display:inline-block"></span>speed now &middot; last ' + vals.length + " samples</div>";
+      grid += '<line x1="0" y1="' + y + '" x2="' + W + '" y2="' + y + '" stroke="var(--border)" vector-effect="non-scaling-stroke"/>';
+      labels += '<span style="position:absolute;left:4px;top:' + (y / H * 100) + '%;transform:translateY(-100%);font-size:10px;line-height:1.3;color:var(--text-faint);font-family:var(--font-mono);pointer-events:none">' + spd(f * max) + "</span>";
+    });
+    $("chart").innerHTML = '<div style="position:relative"><svg viewBox="0 0 ' + W + " " + H + '" style="width:100%;height:' + H + 'px;display:block" preserveAspectRatio="none">' + grid +
+      '<path d="' + area + '" fill="var(--state-success)" opacity="0.12"/><polyline points="' + pts.join(" ") + '" fill="none" stroke="var(--state-success)" stroke-width="2" stroke-linejoin="round" stroke-linecap="round" vector-effect="non-scaling-stroke"/></svg>' + labels + "</div>" +
+      '<div style="display:flex;gap:6px;align-items:center;margin-top:6px;font-size:11px;color:var(--text-dim)"><span style="width:9px;height:9px;border-radius:2px;background:var(--state-success);display:inline-block"></span>speed now &middot; last ' + vals.length + " samples</div>";
   }
   function drawDonut(hit, miss) {
     var tot = hit + miss, pct = tot ? Math.round(hit * 100 / tot) : 0, r = 52, c = 2 * Math.PI * r;
     $("donut").innerHTML = '<svg viewBox="0 0 140 140" width="150" height="150"><circle cx="70" cy="70" r="' + r + '" fill="none" stroke="var(--panel-raised)" stroke-width="14"/>' +
-      '<circle cx="70" cy="70" r="' + r + '" fill="none" stroke="#BD93F9" stroke-width="14" stroke-linecap="round" stroke-dasharray="' + (c * pct / 100) + " " + c + '" transform="rotate(-90 70 70)"/>' +
-      '<text x="70" y="68" text-anchor="middle" fill="#F8F8F2" font-size="24" font-weight="600" font-family="IBM Plex Mono,monospace">' + (tot ? pct + "%" : "-") + "</text>" +
-      '<text x="70" y="86" text-anchor="middle" fill="#6272A4" font-size="10" font-family="IBM Plex Mono,monospace">' + hit + " hit / " + miss + " miss</text></svg>";
+      (pct > 0 ? '<circle cx="70" cy="70" r="' + r + '" fill="none" stroke="var(--accent-purple)" stroke-width="14" stroke-linecap="round" stroke-dasharray="' + (c * pct / 100) + " " + c + '" transform="rotate(-90 70 70)"/>' : "") +
+      '<text x="70" y="76" text-anchor="middle" fill="var(--text)" font-size="24" font-weight="600" font-family="IBM Plex Mono,monospace">' + (tot ? pct + "%" : "-") + "</text></svg>" +
+      '<div style="margin-top:8px;font-size:12px;color:var(--text-faint);font-family:var(--font-mono);text-align:center">' + hit + " hit / " + miss + " miss</div>";
   }
   drawChart(); drawDonut(0, 0);
 
@@ -555,6 +610,114 @@ table.data-table tr:last-child td{border-bottom:none}
   Array.prototype.forEach.call(document.querySelectorAll("[data-copy]"), function (b) {
     b.onclick = function () { copy($(b.getAttribute("data-copy")).textContent); };
   });
+
+  /* ---------------- backend health, saved bytes, stats page, alerts ---------------- */
+  function api(path, opt) {
+    return fetch(path, Object.assign({ cache: "no-store" }, opt || {})).then(function (r) {
+      if (r.status === 401) { location.reload(); return null; }
+      return r.json().then(function (d) { d.__status = r.status; return d; }, function () { return { __status: r.status }; });
+    });
+  }
+  function ymd(d) { return d.slice(5).replace("-", "/"); }
+  function renderTodayCards(st, stats) {
+    var h = "";
+    if (st && st.backend) {
+      var b = st.backend;
+      h += statCard("fa-solid fa-hard-drive", b.up ? "green" : "red", "Backend (VPS)", b.up ? "up" : "DOWN", null, b.up ? b.ms + " ms" + (b.hosts > 1 ? " (slowest of " + b.hosts + ")" : "") : (b.host || "") + " " + (b.error || ""));
+    }
+    if (stats && stats.days) {
+      var t = stats.days.filter(function (x) { return x.d === stats.today; })[0] || { r: 0, b: 0, hb: 0, mb: 0, e: 0 };
+      var pct = t.b ? Math.round(t.hb * 100 / t.b) : 0;
+      h += statCard("fa-solid fa-piggy-bank", "green", "Saved today", fmtBytes(t.hb), null, t.b ? pct + "% of " + fmtBytes(t.b) + " came from the edge" : "no traffic yet");
+      h += statCard("fa-solid fa-server", "orange", "From VPS today", fmtBytes(t.mb), null, "fetched from your backend");
+      h += statCard("fa-solid fa-film", t.e ? "red" : "link", "Requests today", String(t.r), null, t.e ? t.e + " failed" : "none failed");
+    }
+    $("cards2").innerHTML = h;
+  }
+  var lastStatus = null, lastStats = null;
+  function loadExtra() {
+    Promise.all([api("/status.json"), api("/stats.json")]).then(function (r) {
+      lastStatus = r[0] && r[0].backend ? r[0] : null; lastStats = r[1] && r[1].days ? r[1] : null;
+      renderTodayCards(lastStatus, lastStats);
+      renderAlerts(lastStatus);
+      renderStats(lastStats);
+    }).catch(function () {});
+  }
+  function renderAlerts(st) {
+    if (!st) return;
+    var row = function (k, v, col) { return '<tr><td data-label="setting">' + k + '</td><td data-label="value" style="color:' + (col || "var(--text)") + '">' + esc(v) + "</td></tr>"; };
+    $("alertRows").innerHTML =
+      row("telegram", st.telegram ? "configured" : "not set (TG_BOT_TOKEN + TG_CHAT_ID)", st.telegram ? C.green : C.orange) +
+      row("scheduled check", st.alerts_need_do ? "needs the LOGS Durable Object" : "every 5 min", st.alerts_need_do ? C.orange : C.green) +
+      row("alert on failures", st.alert_errors + " errors / 10 min") +
+      row("alert on low hit rate", st.alert_min_hit ? "below " + st.alert_min_hit + "%" : "off (ALERT_MIN_HIT_PCT)") +
+      row("blocked countries", st.blocked_countries && st.blocked_countries.length ? st.blocked_countries.join(", ") : "none (BLOCK_COUNTRIES)");
+  }
+  function renderStats(stats) {
+    if (!stats) return;
+    var days = stats.days, last14 = days.slice(-14), last7 = days.slice(-7);
+    var sum = function (a, k) { return a.reduce(function (n, x) { return n + (x[k] || 0); }, 0); };
+    var b7 = sum(last7, "b"), hb7 = sum(last7, "hb"), r7 = sum(last7, "r"), e7 = sum(last7, "e"), h7 = sum(last7, "h"), m7 = sum(last7, "m");
+    $("statCards").innerHTML =
+      statCard("fa-solid fa-piggy-bank", "green", "Saved (7 days)", fmtBytes(hb7), null, b7 ? Math.round(hb7 * 100 / b7) + "% of " + fmtBytes(b7) : "no traffic yet") +
+      statCard("fa-solid fa-database", "pink", "Sent (7 days)", fmtBytes(b7), null, r7 + " requests") +
+      statCard("fa-solid fa-bolt", "yellow", "Chunk hit rate", h7 + m7 ? Math.round(h7 * 100 / (h7 + m7)) + "%" : "-", h7 + m7 ? Math.round(h7 * 100 / (h7 + m7)) : null) +
+      statCard("fa-solid fa-triangle-exclamation", e7 ? "red" : "green", "Failed (7 days)", String(e7), null, r7 ? Math.round(e7 * 100 / r7) + "% of requests" : "");
+    // 14 day stacked bars (div based, so they follow the theme)
+    var byDay = {}; days.forEach(function (x) { byDay[x.d] = x; });
+    var keys = [], base = new Date(stats.today + "T00:00:00Z");
+    for (var i = 13; i >= 0; i--) { keys.push(new Date(base.getTime() - i * 86400000).toISOString().slice(0, 10)); }
+    var max = Math.max.apply(null, keys.map(function (k) { return byDay[k] ? byDay[k].b : 0; }).concat([1]));
+    $("dayChart").innerHTML = '<div class="dbars">' + keys.map(function (k) {
+      var x = byDay[k] || { b: 0, hb: 0, mb: 0 }, tot = x.hb + x.mb || x.b, hpx = tot ? (x.b / max * 100) : 0;
+      var ep = tot ? x.hb / tot : 0;
+      return '<div class="dbar" title="' + esc(k + " - " + fmtBytes(x.b) + " (" + fmtBytes(x.hb) + " from edge)") + '"><i class="v" style="height:' + (hpx * (1 - ep)) + '%"></i><i class="e" style="height:' + (hpx * ep) + '%"></i></div>';
+    }).join("") + '</div><div class="dlabels">' + keys.map(function (k, i) { return "<span>" + (i % 2 ? "" : ymd(k)) + "</span>"; }).join("") + '</div>' +
+      '<div class="leg"><span><b style="background:var(--accent-purple)"></b>from edge cache</span><span><b style="background:var(--state-running)"></b>from VPS</span></div>';
+    var rows = days.slice().reverse().map(function (x) {
+      var pct = x.b ? Math.round(x.hb * 100 / x.b) : 0;
+      return "<tr>" +
+        '<td class="nolabel" style="color:var(--text)">' + esc(x.d) + (x.d === stats.today ? ' <span class="fsub" style="display:inline">today</span>' : "") + "</td>" +
+        '<td data-label="requests">' + x.r + "</td>" +
+        '<td data-label="sent">' + fmtBytes(x.b) + "</td>" +
+        '<td data-label="from edge"><span><span style="color:var(--accent-purple)">' + fmtBytes(x.hb) + "</span> (" + pct + "%)</span></td>" +
+        '<td data-label="from VPS"><span style="color:var(--state-running)">' + fmtBytes(x.mb) + "</span></td>" +
+        '<td data-label="failed">' + (x.e ? '<span style="color:var(--state-error)">' + x.e + "</span>" : "0") + "</td></tr>";
+    }).join("");
+    $("dayCard").innerHTML = rows ? '<table class="data-table"><thead><tr><th>Day</th><th>Requests</th><th>Sent</th><th>From edge</th><th>From VPS</th><th>Failed</th></tr></thead><tbody>' + rows + "</tbody></table>" : '<div class="empty">No traffic recorded yet.</div>';
+    var files = {};
+    last7.forEach(function (x) { Object.keys(x.f || {}).forEach(function (n) { var f = files[n] || (files[n] = [0, 0]); f[0] += x.f[n][0]; f[1] += x.f[n][1]; }); });
+    var top = Object.keys(files).sort(function (a, b) { return files[b][0] - files[a][0]; }).slice(0, 10);
+    $("topCard").innerHTML = top.length ? '<table class="data-table"><thead><tr><th>Top files (7 days)</th><th>Sent</th><th>Requests</th></tr></thead><tbody>' +
+      top.map(function (n) { return '<tr><td class="nolabel"><div class="fname">' + esc(n) + '</div></td><td data-label="sent">' + fmtBytes(files[n][0]) + '</td><td data-label="requests">' + files[n][1] + "</td></tr>"; }).join("") + "</tbody></table>" : "";
+    $("statsMode").textContent = stats.mode === "durable" ? "Daily totals are kept for 31 days in the Durable Object. Days follow STATS_TZ_MIN (default Sri Lanka)." : "Memory mode (no Durable Object) - daily totals reset when the worker restarts.";
+  }
+  loadExtra(); setInterval(function () { if (!document.hidden) loadExtra(); }, 30000);
+
+  $("tgTest").onclick = function () {
+    api("/alerts/test", { method: "POST" }).then(function (d) { toast(d && d.ok ? "Test alert sent" : (d && d.error) || "Failed"); });
+  };
+  var purgeAsk = 0;
+  $("tPurge").onclick = function () {
+    var b = $("tPurge");
+    if (!$("src").value.trim()) { toast("Paste a link first"); return; }
+    if (!purgeAsk) {
+      purgeAsk = setTimeout(function () { purgeAsk = 0; b.className = "act-btn danger"; b.innerHTML = '<i class="fa-solid fa-broom"></i>purge cache'; }, 2500);
+      b.className = "act-btn asking"; b.innerHTML = '<i class="fa-solid fa-broom"></i>tap again';
+      return;
+    }
+    clearTimeout(purgeAsk); purgeAsk = 0; b.className = "act-btn danger"; b.disabled = true;
+    var del = 0, name = "";
+    (function step(from) {
+      api("/purge", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ url: $("src").value.trim(), from: from }) }).then(function (d) {
+        if (!d || d.error || d.__status >= 400) { b.disabled = false; b.innerHTML = '<i class="fa-solid fa-broom"></i>purge cache'; toast((d && d.error) || "Purge failed"); return; }
+        del += d.deleted; name = d.name;
+        if (d.next != null) { b.innerHTML = '<i class="fa-solid fa-broom"></i>' + d.next + "/" + d.total; step(d.next); return; }
+        b.disabled = false; b.innerHTML = '<i class="fa-solid fa-broom"></i>purge cache';
+        toast(d.total ? "Purged " + del + " chunk" + (del === 1 ? "" : "s") : "Nothing cached for this file here");
+      });
+    })(0);
+  };
 
   /* ---------------- link tester ---------------- */
   var proxyUrl = "", hist = [];

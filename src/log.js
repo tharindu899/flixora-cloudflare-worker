@@ -7,6 +7,8 @@
  * is merged into one entry so a movie shows up once, not 60 times.
  */
 
+import { evaluate } from "./alerts.js";
+
 export const MAX_ENTRIES = 60;
 const SESSION_GAP = 10 * 60 * 1000; // a new session starts after 10 min of silence
 const LOST_AFTER = 20 * 60 * 1000; // "active" for this long without any event -> lost
@@ -67,6 +69,8 @@ export function applyEvent(entries, ev, now) {
       busy: 0,
       h: 0,
       m: 0,
+      hb: 0,
+      mb: 0,
       bps: 0,
       peak: 0,
       range: "",
@@ -82,23 +86,27 @@ export function applyEvent(entries, ev, now) {
   if (ev.type === "start") {
     e.reqs++;
     e.range = String(ev.range || "");
-    e.live[ev.rid] = { sent: 0, ms: 0, h: 0, m: 0 };
+    e.live[ev.rid] = { sent: 0, ms: 0, h: 0, m: 0, hb: 0, mb: 0 };
     e.state = "active";
   } else {
     const sent = Math.max(0, Number(ev.sent) || 0);
     const ms = Math.max(0, Number(ev.ms) || 0);
     const h = Math.max(0, Number(ev.h) || 0);
     const m = Math.max(0, Number(ev.m) || 0);
+    const hb = Math.max(0, Number(ev.hb) || 0);
+    const mb = Math.max(0, Number(ev.mb) || 0);
     if (ev.type === "end") {
       delete e.live[ev.rid];
       e.done += sent;
       e.busy += ms;
       e.h += h;
       e.m += m;
+      e.hb = (e.hb || 0) + hb;
+      e.mb = (e.mb || 0) + mb;
       e.state = Object.keys(e.live).length ? "active" : ev.state || "done";
       if (ev.err) e.err = String(ev.err).slice(0, 120);
     } else {
-      e.live[ev.rid] = { sent, ms, h, m };
+      e.live[ev.rid] = { sent, ms, h, m, hb, mb };
       e.state = "active";
     }
     const bps = Number(ev.bps) || 0;
@@ -120,12 +128,14 @@ export function applyEvent(entries, ev, now) {
 /** Plain, UI-ready copy of the entries (live requests folded into the totals). */
 export function snapshot(entries, now) {
   return entries.map((e) => {
-    let sent = e.done, ms = e.busy, h = e.h, m = e.m;
+    let sent = e.done, ms = e.busy, h = e.h, m = e.m, hb = e.hb || 0, mb = e.mb || 0;
     for (const l of Object.values(e.live)) {
       sent += l.sent;
       ms += l.ms;
       h += l.h;
       m += l.m;
+      hb += l.hb || 0;
+      mb += l.mb || 0;
     }
     const active = Object.keys(e.live).length > 0;
     return {
@@ -141,6 +151,8 @@ export function snapshot(entries, now) {
       reqs: e.reqs,
       hit: h,
       miss: m,
+      hit_bytes: hb,
+      miss_bytes: mb,
       t0: e.t0,
       upd: e.upd,
       country: e.country,
@@ -152,16 +164,79 @@ export function snapshot(entries, now) {
   });
 }
 
+// ---------------------------------------------------------------- daily stats (kept 31 days)
+
+export const MAX_DAYS = 31;
+const MAX_FILES_PER_DAY = 25;
+export const memDays = {};
+export const memErrs = [];
+
+export function dayKey(now, offsetMin = 330) {
+  return new Date(now + offsetMin * 60000).toISOString().slice(0, 10);
+}
+
+/** Adds one finished request ("end" event) to today's bucket. Mutates `days`. */
+export function addDaily(days, ev, now, offsetMin = 330) {
+  if (!ev || ev.type !== "end") return;
+  const k = dayKey(now, offsetMin);
+  const d = (days[k] ||= { r: 0, b: 0, hb: 0, mb: 0, h: 0, m: 0, e: 0, f: {} });
+  const sent = Math.max(0, Number(ev.sent) || 0);
+  d.r++;
+  d.b += sent;
+  d.hb += Math.max(0, Number(ev.hb) || 0);
+  d.mb += Math.max(0, Number(ev.mb) || 0);
+  d.h += Math.max(0, Number(ev.h) || 0);
+  d.m += Math.max(0, Number(ev.m) || 0);
+  if (ev.state === "error") d.e++;
+  const name = String(ev.name || "?").slice(0, 100);
+  const f = (d.f[name] ||= [0, 0]);
+  f[0] += sent;
+  f[1]++;
+  const names = Object.keys(d.f);
+  if (names.length > MAX_FILES_PER_DAY + 10) {
+    names
+      .sort((a, b) => d.f[b][0] - d.f[a][0])
+      .slice(MAX_FILES_PER_DAY)
+      .forEach((n) => delete d.f[n]);
+  }
+  const keys = Object.keys(days).sort();
+  while (keys.length > MAX_DAYS) delete days[keys.shift()];
+}
+
+export function noteError(errs, ev, now) {
+  if (ev && ev.type === "end" && ev.state === "error") {
+    errs.push(now);
+    if (errs.length > 50) errs.splice(0, errs.length - 50);
+  }
+}
+
+/** UI-ready: oldest first, plus the key of "today". */
+export function statsView(days, now, offsetMin = 330) {
+  return {
+    today: dayKey(now, offsetMin),
+    days: Object.keys(days)
+      .sort()
+      .map((k) => ({ d: k, ...days[k] })),
+  };
+}
+
 const json = (obj, status = 200) =>
   new Response(JSON.stringify(obj), { status, headers: { "Content-Type": "application/json", "Cache-Control": "no-store" } });
 
-/** Durable Object: one instance ("main") holds the log. */
+/** Durable Object: one instance ("main") holds the log, the daily stats and the alert state. */
 export class LogHub {
-  constructor(state) {
+  constructor(state, env) {
     this.state = state;
+    this.off = Number.isFinite(Number(env?.STATS_TZ_MIN)) && env?.STATS_TZ_MIN !== "" && env?.STATS_TZ_MIN != null ? Number(env.STATS_TZ_MIN) : 330;
     this.entries = [];
+    this.days = {};
+    this.errs = [];
+    this.alert = null;
     state.blockConcurrencyWhile(async () => {
       this.entries = (await state.storage.get("entries")) || [];
+      this.days = (await state.storage.get("days")) || {};
+      this.errs = (await state.storage.get("errs")) || [];
+      this.alert = (await state.storage.get("alert")) || null;
     });
   }
 
@@ -174,11 +249,34 @@ export class LogHub {
       } catch (_) {
         return json({ error: "bad json" }, 400);
       }
-      applyEvent(this.entries, ev, Date.now());
+      const now = Date.now();
+      applyEvent(this.entries, ev, now);
       await this.state.storage.put("entries", this.entries);
+      if (ev && ev.type === "end") {
+        addDaily(this.days, ev, now, this.off);
+        await this.state.storage.put("days", this.days);
+        if (ev.state === "error") {
+          noteError(this.errs, ev, now);
+          await this.state.storage.put("errs", this.errs);
+        }
+      }
       return json({ ok: true });
     }
     if (path === "/list") return json({ entries: snapshot(this.entries, Date.now()) });
+    if (path === "/stats") return json(statsView(this.days, Date.now(), this.off));
+    if (request.method === "POST" && path === "/alerts") {
+      let body;
+      try {
+        body = await request.json();
+      } catch (_) {
+        return json({ error: "bad json" }, 400);
+      }
+      const now = Date.now();
+      const r = evaluate(this.alert, { ping: body.ping, now, errTimes: this.errs, today: this.days[dayKey(now, this.off)] || null, cfg: body.cfg });
+      this.alert = r.state;
+      await this.state.storage.put("alert", this.alert);
+      return json({ messages: r.messages, state: r.state });
+    }
     if (request.method === "POST" && path === "/clear") {
       this.entries = [];
       await this.state.storage.put("entries", this.entries);
