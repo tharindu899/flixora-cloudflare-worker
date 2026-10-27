@@ -1,8 +1,31 @@
-name = "flixora-stream-proxy"
+name = "flixora-proxy"
 main = "src/index.js"
-compatibility_date = "2026-10-27"
+compatibility_date = "2025-10-01"
 workers_dev = true
 
+# Edge caching only works on a custom domain (not *.workers.dev).
+# Uncomment and set your own hostname (domain must be on Cloudflare):
+# routes = [{ pattern = "stream.example.com", custom_domain = true }]
+
 [vars]
-# Set this to the public HTTPS origin of your Flixora backend, without a path.
-BACKEND_ORIGIN = "https://YOUR-BACKEND-DOMAIN.example"
+# REQUIRED - host(s) of your Flixora backend (same host as API_BASE_URL), comma separated.
+ALLOWED_ORIGINS = "api.example.com"
+
+# Chunk size cached at the edge, in MB (1-32). 4 is a good balance for Free plan memory.
+CHUNK_MB = "4"
+# Open-ended Range requests ("bytes=N-") are answered with at most this many chunks;
+# the player automatically asks for the next part. Keeps every request under the 50-subrequest limit.
+MAX_CHUNKS = "12"
+# How long a chunk stays in the edge cache (seconds). Default 7 days.
+CACHE_TTL = "604800"
+# "auto" = on for custom domains, off for *.workers.dev. Use "true"/"false" to force.
+ENABLE_CACHE = "auto"
+# If your player does NOT re-request after a shorter 206, set to "false".
+CAP_OPEN_RANGES = "true"
+# Start looking up / fetching the next chunk while the current one streams.
+PREFETCH_NEXT = "true"
+# Backend has TURNSTILE_SECRET set? Then keep "true" and add the same value as a Worker secret.
+# Backend has Turnstile OFF? Set "false" so downloads are cached too.
+BACKEND_USES_TURNSTILE = "true"
+# Optional short mode: lets https://worker/dl/<id>/<name> map to this backend URL.
+# ORIGIN_URL = "https://api.example.com"

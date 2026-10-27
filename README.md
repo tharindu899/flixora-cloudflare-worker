@@ -1,50 +1,85 @@
-# Flixora Cloudflare Worker stream proxy
+# Flixora Proxy (Cloudflare Free Worker)
 
-[![Deploy to Cloudflare](https://deploy.workers.cloudflare.com/button)](https://deploy.workers.cloudflare.com/?url=https://github.com/tharindu899/flixora-cloudflare-worker)
+Flixora backend (`/dl` සහ `/dld`) ඉස්සරහින් තියන stream/download proxy එකක්.
 
-**One-click setup:** First upload this folder's contents to a GitHub repository named `flixora-cloudflare-worker` under `tharindu899` (or edit the button URL below to match your own public repository). Then click **Deploy to Cloudflare** above and follow Cloudflare's prompts. The button cannot work until that GitHub repository exists and is accessible to Cloudflare.
+## මොකද කරන්නේ
 
-> **Before using it:** Set `BACKEND_ORIGIN` to your real backend origin and configure the `PROXY_KEY` secret in Cloudflare. Never commit secrets to GitHub. See the deployment steps below.
+- හැම Range request එකක්ම **aligned chunks** (default 4 MB) වලට කඩලා, chunk එකක් Cloudflare edge cache එකේ save කරනවා.
+  ඊට පස්සේ ඒ chunk එක ඉල්ලන ඕනෑම user කෙනෙක්ට (replay, seek, වෙන viewer) **VPS එකටවත් Telegram එකටවත් නොගිහින්** edge එකෙන්ම යනවා.
+- Chunk එක cache එකට යන ගමන්ම user ට stream වෙනවා (buffer කරන්නේ නෑ), ඒ නිසා first byte ඉක්මනින් එනවා. ඊළඟ chunk එක කලින්ම lookup කරනවා.
+- Backend එකේ Turnstile download token (`dt`) එක Worker එකම verify කරනවා (same HMAC), ඒ නිසා cache එකෙන් download gate එක bypass කරන්න බෑ.
+- Open proxy එකක් නෙවෙයි: `ALLOWED_ORIGINS` වල තියන host එකේ `/dl` සහ `/dld` විතරයි යන්නේ.
+- Subrequest limit (Free: 50) අහම්බෙන්වත් පැන්නොත් ඉතුරු කොටස එක origin request එකකින් stream කරනවා, response එක කැඩෙන්නේ නෑ.
 
-A small Cloudflare Worker compatible with Flixora-back's `MEDIAFLOW_PROXY` URL shape. It forwards GET/HEAD and Range headers and streams the upstream response body without buffering it in JavaScript. It intentionally disables caching because Flixora links may be short-lived or user-specific.
+## Setup
 
-## Important bandwidth limitation
-
-This Worker does **not** remove origin/VPS bandwidth usage when `d=` points to your Flixora backend: the VPS still sends the entire video to Cloudflare, then Cloudflare sends it to the viewer. It may help with edge routing/CORS, but it is not a bandwidth-reduction solution. To materially reduce VPS egress, the media bytes must be fetched from a source that does not route through your VPS (for example, a permitted direct Telegram CDN URL), or use a proper media CDN/object storage. Do not expose Telegram bot tokens or internal file-location URLs to the browser.
-
-Cloudflare Workers Free is not an unlimited video CDN, and Telegram/Cloudflare limits still apply. This cannot promise unlimited file sizes or bypass Telegram restrictions.
-
-## Deploy
-
-1. Install Node.js and run `npm install` in this folder.
-2. Edit `wrangler.toml`: set `BACKEND_ORIGIN` to your public HTTPS backend origin, e.g. `https://api.example.com` (no path).
-3. Set a strong secret:
-
-   `npx wrangler secret put PROXY_KEY`
-
-   Enter a random secret of at least 32 characters. Do not commit it to Git.
-4. Deploy: `npm run deploy`.
-5. In Flixora backend environment/config, set:
-
-   ```env
-   API_BASE_URL=https://YOUR-BACKEND-DOMAIN.example
-   HTTP_PROXY_URL=https://YOUR-WORKER.workers.dev
-   MEDIAFLOW_PROXY=true
-   MEDIAFLOW_PASSWORD=YOUR_SAME_RANDOM_SECRET
-   ```
-
-   `MEDIAFLOW_PASSWORD` must match the Worker `PROXY_KEY`. Restart/redeploy the backend. Flixora's current code appends `/proxy/stream?d=...&api_password=...`; this Worker expects `key=...`, so **the current backend needs a tiny compatibility change**: change `url += "&api_password=" + quote(Config.MEDIAFLOW_PASSWORD, safe="")` in `Backend/server/main.py` to `url += "&key=" + quote(Config.MEDIAFLOW_PASSWORD, safe="")`. Find the same `api_password` construction for download links and change it there too.
-
-## Test
-
-Open a generated proxy URL. Test playback seeking and downloads; the upstream should return `Accept-Ranges: bytes` and `206 Partial Content` for Range requests. If your backend redirects `/dl` to Telegram, this Worker intentionally refuses redirects; use a dedicated endpoint that streams bytes or extend the implementation to allow only validated Telegram CDN hosts. Never make the Worker an unrestricted open proxy.
-
-## Deploy button URL
-
-If you use a different GitHub account or repository name, change the button link to:
-
-```text
-https://deploy.workers.cloudflare.com/?url=https://github.com/YOUR_USERNAME/YOUR_REPOSITORY
+```bash
+unzip flixora-worker.zip && cd flixora-worker
+npm install
+npm test                      # mock backend එකට against tests
 ```
 
-The badge opens Cloudflare's deployment flow; it does not automatically configure your backend domain, secrets, or Flixora environment variables. Complete those settings after deployment.
+1. `wrangler.toml` එකේ `ALLOWED_ORIGINS` = ඔයාගේ backend host (`API_BASE_URL` එකේ host එකම, උදා `api.example.com`).
+2. Login + secret:
+   ```bash
+   npx wrangler login
+   npx wrangler secret put TURNSTILE_SECRET     # backend config.env එකේ TURNSTILE_SECRET එකම value එක
+   ```
+   Backend එකේ Turnstile off නම් secret එක දාන්න එපා, `BACKEND_USES_TURNSTILE = "false"` කරන්න.
+3. Deploy: `npx wrangler deploy`
+4. **Custom domain එකක් attach කරන්න** (Cloudflare එකේ තියන domain එකක subdomain එකක්, උදා `stream.yourdomain.com`):
+   `wrangler.toml` එකේ `routes = [...]` line එක uncomment කරලා ආයෙ deploy කරන්න.
+   Edge cache (Cache API) වැඩ කරන්නේ custom domain එකේ විතරයි. `*.workers.dev` එකේ Worker එක වැඩ කරනවා, ඒත් cache නැතුව pass-through විතරයි (`ENABLE_CACHE=auto` එකෙන් ඒක automatically handle වෙනවා).
+
+## Backend එකේ proxy link එක දාන්න
+
+Backend එකේ `HTTP_PROXY_URL` support එක දැනටමත් තියෙනවා, code වෙනස් කරන්න ඕනේ නෑ. `config.env` එකට:
+
+```env
+API_BASE_URL="https://api.example.com"
+HTTP_PROXY_URL="https://stream.yourdomain.com"
+MEDIAFLOW_PROXY="true"
+MEDIAFLOW_PASSWORD=""
+```
+
+`MEDIAFLOW_PROXY="true"` දාන්නේ URL එක `https://stream.yourdomain.com/proxy/stream?d=<encoded dl url>` විදිහට හැදෙන නිසා (Cloudflare path එකේ `//` එකතු කරන්න පුළුවන් නිසා මේක safe). Download වලට `r_content-disposition` එකත් backend එක එකතු කරනවා, Worker එක ඒක use කරනවා. Password එක ඕනේ නෑ.
+
+Plain mode ත් වැඩ කරනවා: `MEDIAFLOW_PROXY="false"` සහ `HTTP_PROXY_URL="https://stream.yourdomain.com/"` (**අන්තිමට `/` ඕනේ**, backend එක `base + url` කෙලින්ම ඒකතු කරන නිසා).
+
+ඊට පස්සේ backend restart කරන්න. API response වල `proxy_url` සහ `/api/download-link` ඔයාගේ frontend එක දැනටමත් use කරනවා.
+
+## Check කරන හැටි
+
+```bash
+# status
+curl https://stream.yourdomain.com/health
+
+# 1st request = MISS, 2nd = HIT  (X-Flx-Cache header)
+URL="https://stream.yourdomain.com/proxy/stream?d=$(python3 -c 'import urllib.parse;print(urllib.parse.quote("https://api.example.com/dl/<id>/<name>",safe=""))')"
+curl -s -D- -o /dev/null -H "Range: bytes=0-1048575" "$URL" | grep -i "x-flx-cache\|content-range"
+curl -s -D- -o /dev/null -H "Range: bytes=0-1048575" "$URL" | grep -i "x-flx-cache"
+```
+
+`X-Flx-Cache`: `HIT` (edge එකෙන්), `MISS` (VPS එකෙන් ගත්තා, දැන් cache වුණා), `BYPASS` (subtitle, හෝ Worker එකට token verify කරන්න බැරි download).
+
+## Settings (`wrangler.toml` `[vars]`)
+
+| Var | Default | |
+|---|---|---|
+| `ALLOWED_ORIGINS` | (required) | backend host(s) |
+| `CHUNK_MB` | 4 | chunk size, 1-32 |
+| `MAX_CHUNKS` | 12 | open-ended `bytes=N-` එකකට දෙන max chunks |
+| `CACHE_TTL` | 604800 | seconds |
+| `ENABLE_CACHE` | auto | auto / true / false |
+| `CAP_OPEN_RANGES` | true | player එක short 206 එකක් පස්සේ ඊළඟ range එක ඉල්ලන්නේ නැත්නම් false |
+| `PREFETCH_NEXT` | true | ඊළඟ chunk එක කලින් lookup |
+| `BACKEND_USES_TURNSTILE` | true | backend Turnstile off නම් false |
+| `ORIGIN_URL` | - | optional short mode (`https://proxy/dl/<id>/<name>`) |
+
+## දැනගන්න ඕන limits (honest notes)
+
+- **Cache එක colo එකකට (data center එකකට) වෙනම.** Cloudflare Cache API contents replicate වෙන්නේ නෑ. ඒ නිසා VPS bandwidth save වෙන්නේ එකම region එකේ ඊළඟ viewers ලා ඒ chunk එකම ඉල්ලද්දී. Region එකේ පළවෙනි viewer ට chunk එක තාම VPS එකෙන්ම එනවා.
+- **Free plan: Worker requests 100,000/day**, burst 1,000/min. 1 viewer hour එකකට requests ~ 30-60 ක් යනවා (open ranges cap වෙන නිසා), ඒ නිසා ලොකු traffic එකකට Paid plan ($5) ඕන වෙයි.
+- Full-file download (Range නැති 200) එකේ, පළවෙනි chunks කීපය විතරක් cache path එකෙන් යනවා, ඉතුරු කොටස එක origin request එකකින් stream වෙනවා (Free subrequest limit නිසා). Stream/seek වලට (Range requests) full benefit එක තියෙනවා. Download manager (IDM වගේ) ranges දාලා ඉල්ලුවොත් ඒවටත් cache benefit එක ලැබෙනවා.
+- Telegram limit/flood wait අඩු වෙන්නේ repeat chunk requests cache එකෙන් serve වෙන නිසා සහ එකම isolate එකේ එකම chunk එක එකපාර ඉල්ලුවොත් එකම download එකට wait කරන නිසා. Backend එක 429/502/503/504 දුන්නොත් Worker එක 2 පාරක් retry කරනවා. ඒත් හැම viewer ම අලුත් file එකක් පළවෙනි පාරට ඉල්ලුවොත් Telegram එකට යන requests ඒකම තමයි.
+- Cloudflare Free plan එකෙන් video වගේ ලොකු non-HTML content ගොඩක් cache කරලා serve කිරීම ගැන Cloudflare ගේ Terms of Service එකේ කොටසක් තියෙනවා. Traffic එක ලොකු වුණොත් ඒක ඔයාම check කරගන්න.

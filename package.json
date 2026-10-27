@@ -1,8 +1,15 @@
 {
-  "name": "flixora-cloudflare-worker",
+  "name": "flixora-proxy",
   "version": "1.0.0",
   "private": true,
+  "description": "Cloudflare Worker stream/download proxy with chunked edge caching for the Flixora backend",
   "type": "module",
-  "scripts": { "dev": "wrangler dev", "deploy": "wrangler deploy" },
-  "devDependencies": { "wrangler": "^4.45.0" }
+  "scripts": {
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy",
+    "test": "node --test test/proxy.test.mjs"
+  },
+  "devDependencies": {
+    "wrangler": "^4.0.0"
+  }
 }

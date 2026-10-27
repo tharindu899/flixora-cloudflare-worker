@@ -1,0 +1,2 @@
+# copy to .dev.vars for `npm run dev`
+TURNSTILE_SECRET=
