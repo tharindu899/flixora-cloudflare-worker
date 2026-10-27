@@ -103,8 +103,11 @@ UI එකේ **Live log** panel එක: play / download වෙන හැම file
 cache hit/miss, device + country (IP එක save කරන්නේ නෑ, hash එකක් විතරයි), requests ගණන. Player එකක Range requests
 ඔක්කොම එක entry එකකට merge වෙනවා.
 
-- **LOG_TOKEN secret එකක් දාන්න** (නැත්නම් log එක lock): Cloudflare dashboard -> Workers -> flixora-proxy -> Settings -> Variables and Secrets -> Add -> type *Secret*, name `LOG_TOKEN`.
-  ඒ value එකම UI එකේ Live log එකේ ගහලා Unlock කරන්න.
+- **UI login**: `/ui` එකට username + password ඕනේ. Secrets දෙකක් දාන්න (නැත්නම් login එක වැඩ කරන්නේ නෑ, UI එක lock):
+  `UI_USER` සහ `UI_PASS`. GitHub repo -> Settings -> Secrets and variables -> Actions එකේ ඒ නම් දෙකෙන්ම secrets හදන්න, deploy workflow එක Worker එකට push කරනවා.
+  (නැත්නම් Cloudflare dashboard -> Workers -> flixora-proxy -> Settings -> Variables and Secrets, නැත්නම් `npx wrangler secret put UI_USER` / `UI_PASS`.)
+  Login වුණාම 7 දවසක් cookie එකක් (HttpOnly) තියෙනවා, sidebar එකේ **sign out** එකෙන් අයින් කරන්න. Password මාරු කළාම ඔක්කොම sessions logout වෙනවා.
+  `LOG_TOKEN` දැන් අයින් කළා.
 - `wrangler.toml` එකේ `LOGS` Durable Object binding එක තියෙනවා නම් log එක persist වෙනවා (අන්තිම session 60).
   ඒක අයින් කරොත් memory mode (worker restart වුණාම මැකෙනවා).
 - Bytes count වෙන්නේ chunk එකක් ඉවර වුණාම. ඒ නිසා ගොඩක් ලොකු download එකක් අතරමග නතර කළොත් අන්තිම partial chunk එක ගණන් ගන්නේ නෑ.

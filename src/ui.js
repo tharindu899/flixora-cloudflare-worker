@@ -196,7 +196,7 @@ table.data-table tr:last-child td{border-bottom:none}
         <div style="min-width:0"><div class="t" id="sideHost"></div>
           <div class="s" id="sideState"><span class="dot" style="background:var(--state-idle)"></span>checking</div></div>
       </div>
-      <button class="act-btn" id="forgetKey" style="width:100%;justify-content:center"><i class="fa-solid fa-lock"></i>lock log</button>
+      <button class="act-btn" id="signOut" style="width:100%;justify-content:center"><i class="fa-solid fa-right-from-bracket"></i>sign out</button>
     </div>
   </aside>
 
@@ -233,13 +233,6 @@ table.data-table tr:last-child td{border-bottom:none}
 
       <!-- ================= Live log ================= -->
       <div class="page hide" id="p-log">
-        <div class="mig-warn lock hide" id="logLock">
-          <div id="logLockMsg" style="margin-bottom:10px"></div>
-          <div class="toolbar" style="margin:0">
-            <input class="field" id="logKey" type="password" autocomplete="off" placeholder="LOG_TOKEN">
-            <button class="mig-primary" id="logSave"><i class="fa-solid fa-unlock"></i>Unlock</button>
-          </div>
-        </div>
         <div class="toolbar">
           <button class="act-btn on" data-f="all">All</button>
           <button class="act-btn" data-f="play"><i class="fa-solid fa-play" style="color:var(--state-success)"></i>Play</button>
@@ -473,22 +466,12 @@ table.data-table tr:last-child td{border-bottom:none}
   drawChart(); drawDonut(0, 0);
 
   /* ---------------- live log ---------------- */
-  var logKey = "", logFilter = "all", logAuto = true, logData = null, logBusy = false, locked = false, askClear = 0;
-  try { logKey = localStorage.getItem("flx-key") || ""; } catch (e) {}
-  $("logKey").value = logKey;
+  var logFilter = "all", logAuto = true, logData = null, logBusy = false, askClear = 0;
 
   function stateBadge(st) {
     var map = { active: ["var(--state-success)", "live", 1], done: ["var(--accent-purple)", "done", 0], aborted: ["var(--state-running)", "stopped", 0], error: ["var(--state-error)", "error", 0], lost: ["var(--state-idle)", "lost", 0] };
     var m = map[st] || ["var(--state-idle)", st, 0];
     return '<span class="badge" style="color:' + m[0] + '"><span class="dot' + (m[2] ? " running" : "") + '" style="background:' + m[0] + '"></span>' + esc(m[1]) + "</span>";
-  }
-  function setLocked(msg) {
-    locked = true;
-    $("logLock").className = "mig-warn lock";
-    $("logLockMsg").textContent = msg;
-    $("logCard").innerHTML = '<div class="empty">log is locked</div>';
-    $("logMode").textContent = "";
-    $("logCards").innerHTML = '<div class="mig-warn" style="grid-column:1/-1;margin:0">Live log is locked - open the Live log page and enter your LOG_TOKEN to see speed and sessions here.</div>';
   }
   function renderLog() {
     if (!logData) return;
@@ -528,26 +511,17 @@ table.data-table tr:last-child td{border-bottom:none}
   function pollLog() {
     if (logBusy) return;
     logBusy = true;
-    fetch("/logs.json", { cache: "no-store", headers: { "x-log-key": logKey } }).then(function (r) {
-      if (r.status === 403) { setLocked("LOG_TOKEN is not set on the worker. Add it as a secret in the Cloudflare dashboard (Worker > Settings > Variables and Secrets), then enter the same value here."); return null; }
-      if (r.status === 401) { setLocked(logKey ? "Wrong key - try again." : "Enter your LOG_TOKEN to see the log."); return null; }
+    fetch("/logs.json", { cache: "no-store" }).then(function (r) {
+      if (r.status === 401) { location.reload(); return null; }
+      if (r.status === 403) { $("logCard").innerHTML = '<div class="empty">UI_USER / UI_PASS are not set on the worker</div>'; return null; }
       return r.json();
     }).then(function (d) {
       if (!d) return;
-      locked = false; $("logLock").className = "mig-warn lock hide";
       logData = d; renderLog();
     }).catch(function () {}).then(function () { logBusy = false; });
   }
-  $("logSave").onclick = function () {
-    logKey = $("logKey").value.trim();
-    try { localStorage.setItem("flx-key", logKey); } catch (e) {}
-    pollLog();
-  };
-  $("logKey").addEventListener("keydown", function (e) { if (e.key === "Enter") $("logSave").onclick(); });
-  $("forgetKey").onclick = function () {
-    logKey = ""; $("logKey").value = ""; logData = null;
-    try { localStorage.removeItem("flx-key"); } catch (e) {}
-    pollLog(); toast("Log locked");
+  $("signOut").onclick = function () {
+    fetch("/logout", { method: "POST" }).then(function () { location.reload(); });
   };
   $("logAuto").onclick = function () {
     logAuto = !logAuto;
@@ -563,7 +537,7 @@ table.data-table tr:last-child td{border-bottom:none}
       return;
     }
     clearTimeout(askClear); askClear = 0; b.className = "act-btn danger"; b.innerHTML = '<i class="fa-solid fa-trash"></i>clear';
-    fetch("/logs/clear", { method: "POST", headers: { "x-log-key": logKey } }).then(function () { logData = null; samples = []; pollLog(); toast("Log cleared"); });
+    fetch("/logs/clear", { method: "POST" }).then(function () { logData = null; samples = []; pollLog(); toast("Log cleared"); });
   };
   Array.prototype.forEach.call(document.querySelectorAll("[data-f]"), function (b) {
     b.onclick = function () {

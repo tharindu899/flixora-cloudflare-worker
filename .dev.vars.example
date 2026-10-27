@@ -1,4 +1,7 @@
 # copy to .dev.vars for `npm run dev`
 TURNSTILE_SECRET=
-# password for the Live log panel (/logs.json)
-LOG_TOKEN=
+# login for the web UI (/ui) and the Live log
+UI_USER=
+UI_PASS=
+# optional: signs the session cookie (default: derived from UI_USER + UI_PASS)
+# SESSION_SECRET=

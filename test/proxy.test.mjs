@@ -61,10 +61,10 @@ const { default: worker } = await import("../src/index.js");
 
 const ENV = { ALLOWED_ORIGINS: HOST, CHUNK_MB: "1", MAX_CHUNKS: "3", ENABLE_CACHE: "true", TURNSTILE_SECRET: SECRET };
 
-async function call(path, { headers = {}, method = "GET", env = ENV } = {}) {
+async function call(path, { headers = {}, method = "GET", env = ENV, payload } = {}) {
   const waits = [];
   const ctx = { waitUntil: (p) => waits.push(p) };
-  const res = await worker.fetch(new Request(`https://stream.example.org${path}`, { method, headers }), env, ctx);
+  const res = await worker.fetch(new Request(`https://stream.example.org${path}`, { method, headers, body: payload }), env, ctx);
   const body = new Uint8Array(await res.arrayBuffer());
   await Promise.all(waits);
   return { res, body };
@@ -255,19 +255,55 @@ test("browser gets the Dracula UI, API clients still get JSON", async () => {
 
 // ---------------------------------------------------------------- activity log
 const { LogHub, applyEvent, snapshot } = await import("../src/log.js");
-const LOGENV = { ...ENV, LOG_TOKEN: "k3y" };
-const getLog = async (env = LOGENV, key = "k3y") =>
-  call("/logs.json", { env, headers: key ? { "x-log-key": key } : {} });
+const LOGENV = { ...ENV, UI_USER: "admin", UI_PASS: "s3cret pass" };
+const login = async (env = LOGENV, user = "admin", pass = "s3cret pass") =>
+  call("/login", { env, method: "POST", headers: { "content-type": "application/json" }, payload: JSON.stringify({ user, pass }) });
+const sessionOf = async (env = LOGENV) => (await login(env)).res.headers.get("set-cookie").split(";")[0];
+const AUTH = await sessionOf();
+const getLog = async (env = LOGENV, cookie = AUTH) =>
+  call("/logs.json", { env, headers: cookie ? { cookie } : {} });
 
-test("log endpoint is locked without LOG_TOKEN / wrong key", async () => {
-  assert.equal((await getLog(ENV, "x")).res.status, 403);
-  assert.equal((await getLog(LOGENV, "nope")).res.status, 401);
+test("login: wrong credentials rejected, right ones set an HttpOnly session cookie", async () => {
+  assert.equal((await login(ENV)).res.status, 403); // UI_USER / UI_PASS not configured
+  assert.equal((await login(LOGENV, "admin", "nope")).res.status, 401);
+  assert.equal((await login(LOGENV, "nope", "s3cret pass")).res.status, 401);
+  const r = await login();
+  assert.equal(r.res.status, 200);
+  const c = r.res.headers.get("set-cookie");
+  assert.match(c, /^flx_sess=\d+\.[0-9a-f]{64};/);
+  assert.match(c, /HttpOnly/);
+  assert.match(c, /SameSite=Strict/);
+  assert.match(c, /Secure/);
+  assert.equal((await call("/login", { env: LOGENV, method: "POST", payload: "{}" })).res.status, 400); // not JSON content-type
+  assert.equal((await call("/login", { env: LOGENV })).res.status, 405);
+});
+
+test("log endpoint is locked without a valid session", async () => {
+  assert.equal((await getLog(ENV, AUTH)).res.status, 403);
   assert.equal((await getLog(LOGENV, "")).res.status, 401);
+  assert.equal((await getLog(LOGENV, "flx_sess=1.abc")).res.status, 401);
+  const past = Math.floor(Date.now() / 1000) - 10;
+  assert.equal((await getLog(LOGENV, `flx_sess=${past}.${AUTH.split(".")[1]}`)).res.status, 401);
+  // session signed for another password is not accepted
+  assert.equal((await getLog({ ...LOGENV, UI_PASS: "changed" }, AUTH)).res.status, 401);
+  assert.equal((await call("/logs/clear", { env: LOGENV, method: "POST" })).res.status, 401);
+});
+
+test("UI page shows the sign-in form until logged in; logout clears the cookie", async () => {
+  let r = await call("/ui", { env: LOGENV });
+  let html = new TextDecoder().decode(r.body);
+  assert.match(html, /Sign in/);
+  assert.doesNotMatch(html, /Live log/);
+  r = await call("/ui", { env: LOGENV, headers: { cookie: AUTH } });
+  html = new TextDecoder().decode(r.body);
+  assert.match(html, /Live log/);
+  r = await call("/logout", { env: LOGENV, method: "POST" });
+  assert.match(r.res.headers.get("set-cookie"), /Max-Age=0/);
 });
 
 test("play and download show up in the log with file, size and speed", async () => {
   resetAll();
-  await call("/logs/clear", { env: LOGENV, method: "POST", headers: { "x-log-key": "k3y", "user-agent": "VLC/3.0 (Android)" } });
+  await call("/logs/clear", { env: LOGENV, method: "POST", headers: { cookie: AUTH, "user-agent": "VLC/3.0 (Android)" } });
   await call(plain(), { env: LOGENV, headers: { Range: "bytes=0-", "user-agent": "Mozilla/5.0 (Linux; Android 14) Chrome/120.0 Safari/537.36" } });
   const tok = makeToken(FILE_ID);
   await call(`/https://${HOST}/dld/${tok}/${FILE_ID}/movie.mkv`, { env: LOGENV });
@@ -286,7 +322,7 @@ test("play and download show up in the log with file, size and speed", async () 
   assert.equal(dl.state, "done");
   assert.ok(dl.hit + dl.miss >= 1);
   // clear works
-  await call("/logs/clear", { env: LOGENV, method: "POST", headers: { "x-log-key": "k3y" } });
+  await call("/logs/clear", { env: LOGENV, method: "POST", headers: { cookie: AUTH } });
   assert.equal(JSON.parse(new TextDecoder().decode((await getLog()).body)).entries.length, 0);
 });
 

@@ -14,6 +14,8 @@
  */
 
 import { UI_HTML } from "./ui.js";
+import { loginHtml } from "./login.js";
+import { authConfigured, checkLogin, isAuthed, sessionCookie, clearCookie } from "./auth.js";
 import { applyEvent, snapshot, uaLabel, memEntries } from "./log.js";
 
 export { LogHub } from "./log.js";
@@ -668,12 +670,41 @@ async function handle(request, env, ctx) {
     h.set("Access-Control-Max-Age", "86400");
     return new Response(null, { status: 204, headers: h });
   }
-  const isLogClear = request.method === "POST" && url.pathname === "/logs/clear";
-  if (request.method !== "GET" && request.method !== "HEAD" && !isLogClear) return jsonError(405, "Method not allowed");
+  const isPostRoute = request.method === "POST" && ["/logs/clear", "/login", "/logout"].includes(url.pathname);
+  if (request.method !== "GET" && request.method !== "HEAD" && !isPostRoute) return jsonError(405, "Method not allowed");
+  const secure = url.protocol === "https:";
+
+  if (url.pathname === "/login") {
+    if (request.method !== "POST") return jsonError(405, "Use POST");
+    if (!authConfigured(env)) return jsonError(403, "UI_USER / UI_PASS are not set on the worker");
+    if (!(request.headers.get("content-type") || "").includes("application/json")) return jsonError(400, "Send JSON");
+    let body;
+    try {
+      const text = await request.text();
+      if (text.length > 2048) throw new Error("too big");
+      body = JSON.parse(text);
+    } catch (_) {
+      return jsonError(400, "Bad request");
+    }
+    if (!(await checkLogin(env, String(body?.user ?? ""), String(body?.pass ?? "")))) {
+      await new Promise((r) => setTimeout(r, 700)); // slow down guessing
+      return jsonError(401, "Wrong username or password");
+    }
+    return new Response(JSON.stringify({ ok: true }), {
+      headers: { "Content-Type": "application/json", "Cache-Control": "no-store", "Set-Cookie": await sessionCookie(env, secure) },
+    });
+  }
+  if (url.pathname === "/logout") {
+    if (request.method !== "POST") return jsonError(405, "Use POST");
+    return new Response(JSON.stringify({ ok: true }), {
+      headers: { "Content-Type": "application/json", "Cache-Control": "no-store", "Set-Cookie": clearCookie(secure) },
+    });
+  }
 
   const wantsHtml = (request.headers.get("accept") || "").includes("text/html");
   if (url.pathname === "/ui" || (url.pathname === "/" && wantsHtml)) {
-    return new Response(request.method === "HEAD" ? null : UI_HTML, {
+    const authed = await isAuthed(request, env);
+    return new Response(request.method === "HEAD" ? null : authed ? UI_HTML : loginHtml(authConfigured(env)), {
       headers: {
         "Content-Type": "text/html; charset=utf-8",
         "Cache-Control": "no-cache",
@@ -705,8 +736,8 @@ async function handle(request, env, ctx) {
   }
 
   if (url.pathname === "/logs.json" || url.pathname === "/logs/clear") {
-    if (!env.LOG_TOKEN) return jsonError(403, "LOG_TOKEN is not set on the worker");
-    if (!timingSafeEqual(String(env.LOG_TOKEN), request.headers.get("x-log-key") || "")) return jsonError(401, "Wrong log key");
+    if (!authConfigured(env)) return jsonError(403, "UI_USER / UI_PASS are not set on the worker");
+    if (!(await isAuthed(request, env))) return jsonError(401, "Sign in required");
     const plain = (obj) =>
       new Response(JSON.stringify(obj), { headers: { "Content-Type": "application/json", "Cache-Control": "no-store" } });
     try {

@@ -21,5 +21,9 @@ jobs:
           accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
           secrets: |
             TURNSTILE_SECRET
+            UI_USER
+            UI_PASS
         env:
           TURNSTILE_SECRET: ${{ secrets.TURNSTILE_SECRET }}
+          UI_USER: ${{ secrets.UI_USER }}
+          UI_PASS: ${{ secrets.UI_PASS }}
