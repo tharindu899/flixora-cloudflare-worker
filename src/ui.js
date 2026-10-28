@@ -239,7 +239,7 @@ table.data-table tr:last-child td{border-bottom:none}
         <div class="stat-grid" id="cards2"></div>
         <div class="mig-warn hide" id="limNote"></div>
         <div class="stat-grid" id="cards3"></div>
-        <div class="mig-title"><i class="fa-solid fa-triangle-exclamation" style="color:var(--state-running)"></i>Recent errors</div>
+        <div class="mig-title"><i class="fa-solid fa-triangle-exclamation" style="color:var(--state-running)"></i>Recent errors<span class="grow"></span><button class="act-btn" id="errCopy" title="Copy the error log" style="text-transform:none;letter-spacing:0"><i class="fa-regular fa-copy"></i>copy</button></div>
         <div class="card" style="margin-bottom:6px" id="errCard"><div class="empty">loading&hellip;</div></div>
         <div class="hint" id="errHint" style="margin-bottom:22px"></div>
         <div class="card" style="margin-bottom:10px" id="limTable"><div class="empty">loading&hellip;</div></div>
@@ -401,7 +401,12 @@ table.data-table tr:last-child td{border-bottom:none}
     }).then(function () { $("ovRefresh").disabled = false; });
   }
   $("ovRefresh").onclick = loadOverview;
+  var errText = "";
+  $("errCopy").onclick = function () { if (errText) copy(errText); else toast("No errors to copy"); };
   function renderErrors(d) {
+    errText = d && d.errors.length ? d.errors.map(function (x) {
+      return new Date(x.t).toISOString().replace("T", " ").slice(0, 19) + " UTC | " + x.s + " | " + x.m + (x.n > 1 ? " (x" + x.n + ")" : "") + " | " + (x.f || "-") + " | " + (x.c || "-");
+    }).join("\n") : "";
     if (!d) { $("errCard").innerHTML = '<div class="empty">Error log unavailable</div>'; return; }
     var list = d.errors;
     $("errCard").innerHTML = list.length ? '<table class="data-table"><thead><tr><th>When</th><th>Status</th><th>What happened</th><th>File</th><th>From</th></tr></thead><tbody>' + list.slice(0, 20).map(function (x) {

@@ -815,4 +815,5 @@ test("failures are also written to the Cloudflare dashboard logs (console.error)
 test("Overview shows the Recent errors table", async () => {
   const { UI_HTML } = await import("../src/ui.js");
   assert.ok(UI_HTML.includes('id="errCard"') && UI_HTML.includes("/errors.json"));
+  assert.ok(UI_HTML.includes('id="errCopy"'), "copy button for the error log");
 });
