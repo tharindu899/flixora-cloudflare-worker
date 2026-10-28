@@ -16,7 +16,7 @@
 import { UI_HTML } from "./ui.js";
 import { loginHtml } from "./login.js";
 import { authConfigured, checkLogin, isAuthed, sessionCookie, clearCookie, lockStatus, lockFail, lockClear, memLocks } from "./auth.js";
-import { applyEvent, snapshot, uaLabel, memEntries, memDays, memErrs, memUsage, addDaily, noteError, noteUsage, statsView, abuseLimitBytes, heavyClients, gateDecision, addDenied, bumpCf, cfView, memCf, FREE } from "./log.js";
+import { applyEvent, snapshot, uaLabel, memEntries, memDays, memErrs, memUsage, addDaily, noteError, noteUsage, statsView, abuseLimitBytes, heavyClients, gateDecision, addDenied, bumpCf, cfView, memCf, FREE, memElog, pushErr } from "./log.js";
 import { alertConfig, pingBackends, sendTelegram, telegramReady } from "./alerts.js";
 
 export { LogHub } from "./log.js";
@@ -668,6 +668,7 @@ async function serve(request, ctx, c, parsed, reqUrl, env, client) {
       report("end", "done");
     } catch (e) {
       report("end", e instanceof HttpError ? "error" : "aborted", e instanceof HttpError ? e.message : "");
+      if (e instanceof HttpError) recordFailure(env, ctx, request, e.status, `stream stopped: ${e.message}`, parsed.name);
       try {
         await writable.abort(e);
       } catch (_) {
@@ -684,6 +685,53 @@ async function serve(request, ctx, c, parsed, reqUrl, env, client) {
 
   ctx.waitUntil(pump());
   return new Response(readable, { status: partial ? 206 : 200, headers });
+}
+
+// ---------------------------------------------------------------- error log (Overview -> Recent errors, and Cloudflare dashboard -> Logs)
+
+const lastFail = { key: "", t: 0 };
+
+/** File name for the log: from a proxy link, never the download token that sits in /dld/ paths. */
+function fileOf(urlStr) {
+  try {
+    const u = new URL(urlStr);
+    const d = u.searchParams.get("d");
+    const path = d ? new URL(d).pathname : u.pathname;
+    return safeDecode(path.split("/").filter(Boolean).pop() || "").slice(0, 80);
+  } catch (_) {
+    return "";
+  }
+}
+
+function recordFailure(env, ctx, request, status, message, file) {
+  try {
+    const now = Date.now();
+    const e = {
+      t: now,
+      s: status,
+      m: String(message || "").slice(0, 120),
+      f: String(file != null ? file : fileOf(request.url)).slice(0, 80),
+      c: String(request.cf?.country || request.headers.get("cf-ipcountry") || "").slice(0, 3),
+    };
+    console.error(JSON.stringify({ flixora: "failure", status: e.s, error: e.m, file: e.f, country: e.c })); // Cloudflare dashboard -> Workers -> Logs
+    const key = `${e.s}|${e.m}|${e.f}`;
+    if (key === lastFail.key && now - lastFail.t < 10000) return; // a retrying player must not flood the log
+    lastFail.key = key;
+    lastFail.t = now;
+    if (!env.LOGS) {
+      pushErr(memElog, e);
+      return;
+    }
+    const stub = env.LOGS.get(env.LOGS.idFromName("main"));
+    ctx.waitUntil(
+      stub
+        .fetch("https://log/err", { method: "POST", body: JSON.stringify(e) })
+        .then((r) => cancelBody(r))
+        .catch(() => {})
+    );
+  } catch (_) {
+    /* logging must never break a request */
+  }
 }
 
 // ---------------------------------------------------------------- Cloudflare request counter (Free plan: 100,000 / day)
@@ -892,7 +940,7 @@ async function handle(request, env, ctx) {
     }
   }
 
-  if (["/status.json", "/stats.json", "/usage.json", "/alerts/test"].includes(url.pathname)) {
+  if (["/status.json", "/stats.json", "/usage.json", "/errors.json", "/alerts/test"].includes(url.pathname)) {
     if (!authConfigured(env)) return jsonError(403, "UI_USER / UI_PASS are not set on the worker");
     if (!(await isAuthed(request, env))) return jsonError(401, "Sign in required");
     const plain = (obj, status = 200) =>
@@ -926,6 +974,14 @@ async function handle(request, env, ctx) {
         });
       } catch (_) {
         return jsonError(502, "Stats store unavailable");
+      }
+    }
+    if (url.pathname === "/errors.json") {
+      try {
+        const errors = stub ? (await (await stub.fetch("https://log/errlog")).json()).errors || [] : memElog;
+        return plain({ mode: stub ? "durable" : "memory", now: Date.now(), errors });
+      } catch (_) {
+        return jsonError(502, "Error log unavailable");
       }
     }
     if (url.pathname === "/usage.json") {
@@ -1019,7 +1075,11 @@ export default {
     try {
       return await handle(request, env, ctx);
     } catch (e) {
-      if (e instanceof HttpError) return jsonError(e.status, e.message);
+      if (e instanceof HttpError) {
+        recordFailure(env, ctx, request, e.status, e.message);
+        return jsonError(e.status, e.message);
+      }
+      recordFailure(env, ctx, request, 502, `Proxy error: ${e && e.message ? e.message : e}`);
       return jsonError(502, "Proxy error");
     }
   },

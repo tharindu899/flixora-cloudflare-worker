@@ -186,6 +186,22 @@ const MAX_FILES_PER_DAY = 25;
 export const memDays = {};
 export const memErrs = [];
 
+// ---------------------------------------------------------------- error log (what failed, for the Overview page; errors only, so it costs almost no Free plan writes)
+export const ELOG_MAX = 40;
+export const memElog = [];
+
+/** Adds a failure to the list (newest first); the same failure within a minute only raises its counter. */
+export function pushErr(list, e) {
+  const top = list[0];
+  if (top && top.s === e.s && top.m === e.m && top.f === e.f && e.t - top.t < 60000) {
+    top.n = (top.n || 1) + 1;
+    top.t = e.t;
+    return;
+  }
+  list.unshift({ t: e.t, s: e.s, m: e.m, f: e.f, c: e.c || "", n: 1 });
+  if (list.length > ELOG_MAX) list.length = ELOG_MAX;
+}
+
 export function dayKey(now, offsetMin = 330) {
   return new Date(now + offsetMin * 60000).toISOString().slice(0, 10);
 }
@@ -358,6 +374,7 @@ export class LogHub {
     this.locks = {};
     this.usage = {};
     this.cf = { day: "", q: 0, dr: 0, dw: 0 }; // Cloudflare usage of the current UTC day
+    this.elog = []; // recent failures, newest first
     this.refreshEnv();
     state.blockConcurrencyWhile(async () => {
       this.entries = (await state.storage.get("entries")) || [];
@@ -366,6 +383,7 @@ export class LogHub {
       this.alert = (await state.storage.get("alert")) || null;
       this.locks = (await state.storage.get("locks")) || {};
       this.cf = (await state.storage.get("cf")) || this.cf;
+      this.elog = (await state.storage.get("elog")) || [];
       this.refreshEnv();
     });
   }
@@ -467,6 +485,19 @@ export class LogHub {
       const body = await request.json().catch(() => ({}));
       this.bump({ q: Math.min(100000, Number(body.n) || 0) });
       await this.put("cf", this.cf);
+      return json({ ok: true });
+    }
+    if (path === "/errlog") return json({ errors: this.elog });
+    if (request.method === "POST" && path === "/err") {
+      const b = await request.json().catch(() => ({}));
+      pushErr(this.elog, {
+        t: Date.now(),
+        s: Math.floor(Number(b.s)) || 0,
+        m: String(b.m || "").slice(0, 120),
+        f: String(b.f || "").slice(0, 80),
+        c: String(b.c || "").slice(0, 3),
+      });
+      await this.put("elog", this.elog);
       return json({ ok: true });
     }
     if (request.method === "POST" && path === "/clear") {

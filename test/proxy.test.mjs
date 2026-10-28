@@ -739,3 +739,80 @@ test("UI is small: only the Overview page, no polling, valid script", async () =
   const vm = await import("node:vm");
   assert.doesNotThrow(() => new vm.Script(script));
 });
+
+// ---------------------------------------------------------------- error log
+const { pushErr, ELOG_MAX } = await import("../src/log.js");
+const quiet = console.error;
+
+test("error log list: same failure within a minute is counted, list is capped", () => {
+  const list = [];
+  pushErr(list, { t: 1000, s: 404, m: "Origin returned 404", f: "a.mkv", c: "LK" });
+  pushErr(list, { t: 2000, s: 404, m: "Origin returned 404", f: "a.mkv", c: "LK" });
+  assert.equal(list.length, 1);
+  assert.deepEqual([list[0].n, list[0].t], [2, 2000]);
+  pushErr(list, { t: 3000, s: 404, m: "Origin returned 404", f: "b.mkv" });
+  assert.equal(list.length, 2);
+  for (let i = 0; i < 60; i++) pushErr(list, { t: 5000 + i, s: 502, m: "x" + i, f: "" });
+  assert.equal(list.length, ELOG_MAX);
+});
+
+test("a failed stream is logged with status, reason and file name (never the token), memory mode", async () => {
+  console.error = () => {};
+  try {
+    resetAll();
+    const down = { ...LOGENV, ALLOWED_ORIGINS: "down.example.com" };
+    assert.equal((await call(`/https://down.example.com/dl/${FILE_ID}/mem-fail.mkv`, { env: down, headers: { Range: "bytes=0-9" } })).res.status, 502);
+    // the same failure again right away is not listed twice
+    await call(`/https://down.example.com/dl/${FILE_ID}/mem-fail.mkv`, { env: down, headers: { Range: "bytes=0-9" } });
+    assert.equal((await call("/errors.json", { env: LOGENV })).res.status, 401);
+    const d = jsonOf(await call("/errors.json", { env: LOGENV, headers: { cookie: AUTH } }));
+    const e = d.errors.filter((x) => x.f === "mem-fail.mkv");
+    assert.equal(d.mode, "memory");
+    assert.equal(e.length, 1);
+    assert.deepEqual([e[0].s, e[0].m], [502, "Origin returned 502"]);
+    // download links carry a token in the path: only the file name is kept
+    const tok = makeToken(FILE_ID);
+    await call(`/https://down.example.com/dld/${tok}/${FILE_ID}/token-fail.mkv`, { env: down });
+    const all = JSON.stringify(jsonOf(await call("/errors.json", { env: LOGENV, headers: { cookie: AUTH } })));
+    assert.ok(all.includes("token-fail.mkv"));
+    assert.ok(!all.includes(tok));
+  } finally {
+    console.error = quiet;
+  }
+});
+
+test("a failed stream is logged in the Durable Object and survives for the Overview page", async () => {
+  console.error = () => {};
+  try {
+    resetAll();
+    const down = { ...LOGENV, ALLOWED_ORIGINS: "down.example.com" };
+    const { kv, LOGS } = makeHub(down);
+    const env = { ...down, LOGS };
+    await call(`/https://down.example.com/dl/${FILE_ID}/do-fail.mkv`, { env, headers: { Range: "bytes=0-9", "cf-ipcountry": "LK" } });
+    const d = jsonOf(await call("/errors.json", { env, headers: { cookie: AUTH } }));
+    assert.equal(d.mode, "durable");
+    assert.deepEqual([d.errors[0].f, d.errors[0].s, d.errors[0].c], ["do-fail.mkv", 502, "LK"]);
+    assert.equal(kv.get("elog").length, 1);
+  } finally {
+    console.error = quiet;
+  }
+});
+
+test("failures are also written to the Cloudflare dashboard logs (console.error)", async () => {
+  const seen = [];
+  console.error = (line) => seen.push(String(line));
+  try {
+    resetAll();
+    await call(`/https://down.example.com/dl/${FILE_ID}/console-fail.mkv`, { env: { ...LOGENV, ALLOWED_ORIGINS: "down.example.com" }, headers: { Range: "bytes=0-9" } });
+  } finally {
+    console.error = quiet;
+  }
+  const line = seen.find((l) => l.includes("console-fail.mkv"));
+  assert.ok(line);
+  assert.equal(JSON.parse(line).status, 502);
+});
+
+test("Overview shows the Recent errors table", async () => {
+  const { UI_HTML } = await import("../src/ui.js");
+  assert.ok(UI_HTML.includes('id="errCard"') && UI_HTML.includes("/errors.json"));
+});

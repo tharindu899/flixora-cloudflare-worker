@@ -60,3 +60,7 @@ new_sqlite_classes = ["LogHub"]
 # Health check + Telegram alerts every 5 minutes (needs the LOGS Durable Object above).
 [triggers]
 crons = ["*/5 * * * *"]
+
+# Errors are also written with console.error, so they show up in the Cloudflare dashboard (Workers -> flixora-proxy -> Logs).
+[observability]
+enabled = true

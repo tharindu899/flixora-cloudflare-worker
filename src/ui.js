@@ -239,6 +239,9 @@ table.data-table tr:last-child td{border-bottom:none}
         <div class="stat-grid" id="cards2"></div>
         <div class="mig-warn hide" id="limNote"></div>
         <div class="stat-grid" id="cards3"></div>
+        <div class="mig-title"><i class="fa-solid fa-triangle-exclamation" style="color:var(--state-running)"></i>Recent errors</div>
+        <div class="card" style="margin-bottom:6px" id="errCard"><div class="empty">loading&hellip;</div></div>
+        <div class="hint" id="errHint" style="margin-bottom:22px"></div>
         <div class="card" style="margin-bottom:10px" id="limTable"><div class="empty">loading&hellip;</div></div>
         <div class="hint" id="limHint"></div>
       </div>
@@ -362,7 +365,7 @@ table.data-table tr:last-child td{border-bottom:none}
   /* ---------------- overview: loaded when opened and on refresh, never polled (every request counts against the Free plan) ---------------- */
   function loadOverview() {
     $("ovRefresh").disabled = true;
-    Promise.all([api("/health"), api("/status.json"), api("/stats.json"), api("/usage.json")]).then(function (r) {
+    Promise.all([api("/health"), api("/status.json"), api("/stats.json"), api("/usage.json"), api("/errors.json")]).then(function (r) {
       var h = r[0] || {}, st = r[1] && r[1].backend ? r[1] : null, stats = r[2] && r[2].days ? r[2] : null, u = r[3] && r[3].meters ? r[3] : null;
       var onoff = function (v) { return v ? "on" : "off"; };
       var col = h.ok ? "var(--state-success)" : "var(--state-error)";
@@ -391,12 +394,22 @@ table.data-table tr:last-child td{border-bottom:none}
           statCard("fa-solid fa-film", t.e ? "red" : "link", "Streams today", String(t.r), null, t.e ? t.e + " failed" : "none failed");
       }
       if (u) renderLimits(u);
+      renderErrors(r[4] && r[4].errors ? r[4] : null);
       $("ovAge").textContent = "updated " + new Date().toLocaleTimeString("en-GB", { hour12: false });
     }).catch(function () {
       $("cards").innerHTML = '<div class="mig-err" style="grid-column:1/-1">Cannot reach the worker</div>';
     }).then(function () { $("ovRefresh").disabled = false; });
   }
   $("ovRefresh").onclick = loadOverview;
+  function renderErrors(d) {
+    if (!d) { $("errCard").innerHTML = '<div class="empty">Error log unavailable</div>'; return; }
+    var list = d.errors;
+    $("errCard").innerHTML = list.length ? '<table class="data-table"><thead><tr><th>When</th><th>Status</th><th>What happened</th><th>File</th><th>From</th></tr></thead><tbody>' + list.slice(0, 20).map(function (x) {
+      return '<tr><td class="nolabel">' + ago(d.now, x.t) + '</td><td data-label="status"><span style="color:' + (x.s >= 500 ? "var(--state-error)" : "var(--state-running)") + '">' + esc(x.s) + '</span></td>' +
+        '<td data-label="what">' + esc(x.m) + (x.n > 1 ? ' <span class="faint">x' + x.n + "</span>" : "") + '</td><td data-label="file">' + esc(x.f || "-") + '</td><td data-label="from">' + esc(x.c || "-") + "</td></tr>";
+    }).join("") + "</tbody></table>" : '<div class="empty">No errors recorded.</div>';
+    $("errHint").textContent = "Every failed stream or download is listed here (last 40, newest first). The same lines are in the Cloudflare dashboard: Workers -> your worker -> Logs." + (d.mode === "memory" ? " Memory mode: this list is per worker instance and resets on restart." : "");
+  }
   function renderLimits(u) {
     var req = u.meters.req, dob = u.meters["do"], rows = u.meters.rows, F = u.free;
     var reset = new Date(u.reset_at).toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit" });

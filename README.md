@@ -91,6 +91,10 @@ curl -s -D- -o /dev/null -H "Range: bytes=0-1048575" "$URL" | grep -i "x-flx-cac
 Worker URL එක browser එකෙන් open කරාම (`/` හෝ `/ui`, login ඕන) එක පිටුවක් (**Overview**) එනවා: status, backend (VPS) up/down, edge cache, token check,
 Cloudflare Free plan usage (Worker requests, Durable Object requests, DO rows written, reset වෙන වෙලාව, limits table) සහ අද saved / VPS bytes.
 
+**Recent errors**: fail වුණ හැම stream / download එකක්ම (status, හේතුව උදා `Origin returned 404`, file නම, රට) Overview එකේ පෙන්නනවා, අන්තිම 40. `wrangler.toml` එකේ `[observability]` on නිසා
+Cloudflare dashboard -> Workers -> flixora-proxy -> **Logs** එකෙත් ඒවා `console.error` විදියට පේනවා (Free plan එකට දවසකට log events 200,000). Download token එක log කරන්නේ නෑ, file නම විතරයි.
+එකම error එක නැවත නැවත ආවොත් (player retry) එක පේළියක් විතරක් තියාගෙන ×n කියලා පෙන්නනවා.
+
 **කිසිම දෙයක් auto-refresh වෙන්නේ නෑ**: Free plan එකේ හැම request එකක්ම ගණන් ගන්න නිසා page එක open කරද්දී සහ `refresh` ඔබද්දී විතරයි data ගන්නේ (requests 4ක්).
 Settings වෙනස් කරන්නේ `wrangler.toml` `[vars]` එකෙන් (redeploy). Live log, Stats, Link tester, Config, Setup පිටු අයින් කළා.
 (පහත Live log / Stats / Purge UI ගැන තියෙන කොටස් දැන් අදාළ නෑ; alerts, limits, protection backend එකේ ඒ විදියටම වැඩ කරනවා.)
