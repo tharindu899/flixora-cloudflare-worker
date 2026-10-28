@@ -297,10 +297,10 @@ test("UI page shows the sign-in form until logged in; logout clears the cookie",
   let r = await call("/ui", { env: LOGENV });
   let html = new TextDecoder().decode(r.body);
   assert.match(html, /Sign in/);
-  assert.doesNotMatch(html, /Live log/);
+  assert.doesNotMatch(html, /Link tester/);
   r = await call("/ui", { env: LOGENV, headers: { cookie: AUTH } });
   html = new TextDecoder().decode(r.body);
-  assert.match(html, /Live log/);
+  assert.match(html, /Link tester/);
   r = await call("/logout", { env: LOGENV, method: "POST" });
   assert.match(r.res.headers.get("set-cookie"), /Max-Age=0/);
 });
@@ -896,10 +896,12 @@ test("scheduled check sends a Telegram alert when a Cloudflare Free limit is nea
   resetConfigCache();
 });
 
-test("UI has the Limits and Config pages with a confirmation dialog, and its script is valid", async () => {
+test("UI is small: Overview, Link tester, Config, a confirmation dialog, no polling, valid script", async () => {
   const { UI_HTML } = await import("../src/ui.js");
-  for (const id of ["p-limits", "p-config", "mBack"]) assert.ok(UI_HTML.includes(`id="${id}"`), id);
+  for (const id of ["p-overview", "p-test", "p-config", "mBack"]) assert.ok(UI_HTML.includes(`id="${id}"`), id);
   const script = /<script>([\s\S]*)<\/script>/.exec(UI_HTML)[1];
+  assert.doesNotMatch(script, /setInterval/, "nothing refreshes by itself (every request counts against the Free plan)");
+  for (const gone of ["p-log", "p-stats", "p-setup", "/logs.json"]) assert.ok(!UI_HTML.includes(gone), gone + " was removed");
   const vm = await import("node:vm");
   assert.doesNotThrow(() => new vm.Script(script));
 });

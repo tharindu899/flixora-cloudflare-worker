@@ -88,16 +88,14 @@ curl -s -D- -o /dev/null -H "Range: bytes=0-1048575" "$URL" | grep -i "x-flx-cac
 
 ## Dashboard UI
 
-Worker URL එක browser එකෙන් open කරාම (`/` හෝ `/ui`) Vps-Dashboard එකේ වගේම Dracula dashboard එකක් එනවා:
-sidebar + topbar, පිටු 4ක් (`#overview`, `#log`, `#test`, `#setup`).
+Worker URL එක browser එකෙන් open කරාම (`/` හෝ `/ui`) සරල Dracula dashboard එකක් එනවා. පිටු 3යි:
 
-- **Overview**: status / edge cache / chunk size / token check / origins / latency cards, throughput chart, cache hit donut
-- **Live log**: ඊළඟ section එක බලන්න (phone එකේ table එක card list එකක් විදියට පෙනෙනවා)
-- **Link tester**: backend link එක paste කරලා HEAD / Range 0-0 test (checks + headers)
-- **Setup**: endpoint examples (copy), `X-Flx-Cache` අර්ථ, current configuration
+- **Overview**: status, backend (VPS) up/down, edge cache, token check, Cloudflare Free plan usage (Worker requests, Durable Object requests, DO rows written, reset වෙන වෙලාව, limits table) සහ අද saved / VPS bytes.
+- **Link tester**: backend link එක paste කරලා HEAD / Range 0-0 test, purge cache.
+- **Config**: settings UI එකෙන් edit (confirm එක්ක).
 
-`/health` තාමත් JSON. Fonts (Inter, IBM Plex Mono) සහ Font Awesome load වෙන්නේ Google Fonts / cdnjs වලින්,
-CSP එකේ ඒ hosts දෙක විතරක් allow කරලා තියෙනවා.
+**කිසිම දෙයක් auto-refresh වෙන්නේ නෑ**: Free plan එකේ හැම request එකක්ම ගණන් ගන්න නිසා, Overview එක open කරද්දී සහ `refresh` ඔබද්දී විතරයි data ගන්නේ (requests 4ක්). Live log, Stats charts සහ Setup පිටු අයින් කළා.
+(පහත Live log / Stats / alerts section වල UI පිටු ගැන තියෙන කොටස් දැන් අදාළ නෑ; alerts, limits, protection backend එකේ ඒ විදියටම වැඩ කරනවා.)
 
 ## Stats, alerts, purge (UI)
 

@@ -258,57 +258,21 @@ select.field{cursor:pointer}
         <div class="topbar-text"><div class="topbar-title" id="tTitle"></div><div class="topbar-subtitle" id="tSub"></div></div>
       </div>
       <div class="topbar-pill"><span class="dot running" id="pillDot" style="background:var(--state-idle)"></span>
-        <span class="pill-clock" id="clock"></span><span class="pill-sep faint">&middot;</span><span class="pill-host" id="pillHost"></span></div>
+        <span class="pill-host" id="pillHost"></span></div>
     </div>
 
     <div class="content-pad">
-
       <!-- ================= Overview ================= -->
       <div class="page" id="p-overview">
+        <div class="toolbar"><span class="grow"></span><span class="faint mono" id="ovAge" style="font-size:11.5px"></span><button class="act-btn" id="ovRefresh"><i class="fa-solid fa-rotate"></i>refresh</button></div>
         <div class="stat-grid" id="cards"></div>
-        <div class="stat-grid" id="cards2"></div>
         <div class="mig-warn hide" id="healthNote"></div>
-        <div class="chart-grid">
-          <div class="chart-card">
-            <div class="chart-card-title">Throughput</div>
-            <div class="chart-card-sub" id="chartSub">Total speed of all active streams (polled every 3s)</div>
-            <div id="chart"></div>
-          </div>
-          <div class="chart-card">
-            <div class="chart-card-title">Cache hit rate</div>
-            <div class="chart-card-sub" id="donutSub">Chunks served from the edge vs the VPS</div>
-            <div style="display:flex;flex-direction:column;align-items:center" id="donut"></div>
-          </div>
-        </div>
-        <div class="stat-grid" id="logCards"></div>
-      </div>
-
-      <!-- ================= Live log ================= -->
-      <div class="page hide" id="p-log">
-        <div class="toolbar">
-          <button class="act-btn on" data-f="all">All</button>
-          <button class="act-btn" data-f="play"><i class="fa-solid fa-play" style="color:var(--state-success)"></i>Play</button>
-          <button class="act-btn" data-f="download"><i class="fa-solid fa-download" style="color:var(--link)"></i>Download</button>
-          <span class="grow"></span>
-          <button class="act-btn" id="logAuto"><span class="dot running" style="background:var(--state-success)"></span>live</button>
-          <button class="act-btn danger" id="logClr"><i class="fa-solid fa-trash"></i>clear</button>
-        </div>
-        <div class="card" id="logCard"><div class="empty">loading&hellip;</div></div>
-        <div class="hint" id="logMode"></div>
-      </div>
-
-      <!-- ================= Stats ================= -->
-      <div class="page hide" id="p-stats">
-        <div class="stat-grid" id="statCards"></div>
-        <div class="chart-card" style="margin-bottom:14px">
-          <div class="chart-card-title">Last 14 days</div>
-          <div class="chart-card-sub">Data sent to viewers: from the edge cache vs from your VPS</div>
-          <div id="dayChart"></div>
-        </div>
-        <div class="card" style="margin-bottom:14px" id="dayCard"><div class="empty">loading&hellip;</div></div>
-        <div class="card" style="margin-bottom:14px" id="heavyCard"></div>
-        <div class="card" id="topCard"></div>
-        <div class="hint" id="statsMode"></div>
+        <div class="mig-title"><i class="fa-solid fa-cloud" style="color:var(--link)"></i>Cloudflare Free plan today</div>
+        <div class="stat-grid" id="cards2"></div>
+        <div class="mig-warn hide" id="limNote"></div>
+        <div class="stat-grid" id="cards3"></div>
+        <div class="card" style="margin-bottom:10px" id="limTable"><div class="empty">loading&hellip;</div></div>
+        <div class="hint" id="limHint"></div>
       </div>
 
       <!-- ================= Link tester ================= -->
@@ -341,14 +305,6 @@ select.field{cursor:pointer}
         </div>
       </div>
 
-      <!-- ================= Limits ================= -->
-      <div class="page hide" id="p-limits">
-        <div class="stat-grid" id="limCards"></div>
-        <div class="mig-warn hide" id="limNote"></div>
-        <div class="card" style="margin-bottom:14px" id="limTable"><div class="empty">loading&hellip;</div></div>
-        <div class="hint" id="limHint"></div>
-      </div>
-
       <!-- ================= Config ================= -->
       <div class="page hide" id="p-config">
         <div class="mig-warn" id="cfgNote">loading&hellip;</div>
@@ -360,42 +316,6 @@ select.field{cursor:pointer}
           <button class="mig-primary" id="cfgSave"><i class="fa-solid fa-floppy-disk"></i>Review &amp; save</button>
         </div>
         <div class="card hide" style="margin-top:14px" id="cfgLogCard"></div>
-      </div>
-
-      <!-- ================= Setup ================= -->
-      <div class="page hide" id="p-setup">
-        <div class="chart-card" style="margin-bottom:14px">
-          <div class="chart-card-title">How it flows</div>
-          <div class="chart-card-sub">Every Range request is split into aligned chunks. A cached chunk never touches your VPS or Telegram.</div>
-          <div class="flow">
-            <span class="node">App / Browser</span><i class="fa-solid fa-arrow-right" style="color:var(--accent-pink)"></i>
-            <span class="node" style="color:var(--link)">This worker</span><i class="fa-solid fa-arrow-right" style="color:var(--accent-pink)"></i>
-            <span class="node" style="color:var(--accent-purple)">Edge cache</span><i class="fa-solid fa-arrow-right" style="color:var(--accent-pink)"></i>
-            <span class="node" style="color:var(--state-running)">Flixora backend</span><i class="fa-solid fa-arrow-right" style="color:var(--accent-pink)"></i>
-            <span class="node">Telegram</span>
-          </div>
-        </div>
-        <div class="term-block" style="margin-bottom:14px">
-          <div class="term-block-header"><span>PLAIN</span><span><button class="term-block-btn" data-copy="e1"><i class="fa-regular fa-copy"></i>copy</button></span></div>
-          <div class="term-body" id="e1" style="color:var(--link);word-break:break-all"></div>
-        </div>
-        <div class="term-block" style="margin-bottom:14px">
-          <div class="term-block-header"><span>MEDIAFLOW STYLE</span><span><button class="term-block-btn" data-copy="e2"><i class="fa-regular fa-copy"></i>copy</button></span></div>
-          <div class="term-body" id="e2" style="color:var(--link);word-break:break-all"></div>
-        </div>
-        <div class="card" style="margin-bottom:14px">
-          <table class="data-table"><thead><tr><th>X-Flx-Cache</th><th>Meaning</th></tr></thead><tbody>
-            <tr><td data-label="header"><span class="tag-pill" style="background:rgba(80,250,123,.15);color:var(--state-success)">HIT</span></td><td data-label="meaning">chunk served from the edge cache</td></tr>
-            <tr><td data-label="header"><span class="tag-pill" style="background:rgba(255,184,108,.15);color:var(--state-running)">MISS</span></td><td data-label="meaning">fetched from the backend, now cached</td></tr>
-            <tr><td data-label="header"><span class="tag-pill" style="background:rgba(189,147,249,.15);color:var(--accent-purple)">META</span></td><td data-label="meaning">HEAD answered from stored metadata</td></tr>
-            <tr><td data-label="header"><span class="tag-pill" style="background:rgba(255,85,85,.15);color:var(--state-error)">BYPASS</span></td><td data-label="meaning">passed straight through (subtitles, odd ranges)</td></tr>
-          </tbody></table>
-        </div>
-        <div class="card" style="margin-bottom:14px"><div class="pad" style="padding-bottom:4px"><div class="mig-title"><i class="fa-brands fa-telegram" style="color:var(--link)"></i>alerts &amp; protection</div></div>
-          <table class="data-table"><tbody id="alertRows"></tbody></table>
-          <div class="pad" style="padding-top:12px"><button class="act-btn" id="tgTest"><i class="fa-solid fa-paper-plane"></i>send test alert</button></div></div>
-        <div class="card"><div class="pad" style="padding-bottom:4px"><div class="mig-title"><i class="fa-solid fa-sliders" style="color:var(--accent-yellow)"></i>configuration</div></div>
-          <table class="data-table"><tbody id="cfg"></tbody></table></div>
       </div>
 
     </div>
@@ -414,13 +334,9 @@ select.field{cursor:pointer}
   var C = { purple: "var(--accent-purple)", pink: "var(--accent-pink)", link: "var(--link)", yellow: "var(--accent-yellow)", green: "var(--state-success)", orange: "var(--state-running)", red: "var(--state-error)" };
 
   var NAV = [
-    { id: "overview", label: "Overview", sub: "Live snapshot of the proxy", icon: "fa-solid fa-gauge-high", color: "link" },
-    { id: "log", label: "Live log", sub: "Who plays and downloads what, and how fast", icon: "fa-solid fa-list-ul", color: "green" },
-    { id: "stats", label: "Stats", sub: "Daily traffic and what the edge cache saved", icon: "fa-solid fa-chart-column", color: "purple" },
-    { id: "limits", label: "Limits", sub: "Cloudflare Free plan usage and limits", icon: "fa-solid fa-gauge", color: "orange" },
+    { id: "overview", label: "Overview", sub: "Status and Cloudflare Free plan usage", icon: "fa-solid fa-gauge-high", color: "link" },
     { id: "test", label: "Link tester", sub: "Check a backend link through this worker", icon: "fa-solid fa-flask", color: "pink" },
-    { id: "config", label: "Config", sub: "Edit the worker settings (saved only after you confirm)", icon: "fa-solid fa-sliders", color: "yellow" },
-    { id: "setup", label: "Setup", sub: "Endpoints, cache headers and configuration", icon: "fa-solid fa-gear", color: "orange" }
+    { id: "config", label: "Config", sub: "Edit the worker settings (saved only after you confirm)", icon: "fa-solid fa-sliders", color: "yellow" }
   ];
 
   function esc(s) {
@@ -506,276 +422,88 @@ select.field{cursor:pointer}
     if (push !== false) { try { history.replaceState(null, "", "#" + id); } catch (e) {} }
     openSide(false);
     window.scrollTo(0, 0);
-    if (id === "limits" && typeof loadUsage === "function") loadUsage();
+    if (id === "overview" && typeof loadOverview === "function") loadOverview();
     if (id === "config" && typeof loadConfig === "function" && !Object.keys(cfgEdits).length) loadConfig();
   }
   Array.prototype.forEach.call(document.querySelectorAll(".nav-item"), function (b) {
     b.onclick = function () { go(b.getAttribute("data-page")); };
   });
   window.addEventListener("hashchange", function () { go(location.hash.slice(1), false); });
-  function tick() { $("clock").textContent = new Date().toLocaleTimeString("en-GB", { hour12: false }); }
-  tick(); setInterval(tick, 1000);
 
-  /* ---------------- health / overview ---------------- */
-  var health = null;
-  function setOnline(state) {
-    var col = state === "ok" ? "var(--state-success)" : state === "bad" ? "var(--state-error)" : "var(--state-idle)";
-    var txt = state === "ok" ? "online" : state === "bad" ? "needs attention" : "checking";
-    $("pillDot").style.background = col;
-    $("sideState").innerHTML = '<span class="dot running" style="background:' + col + '"></span><span style="color:' + col + '">' + txt + "</span>";
-  }
-  function loadHealth() {
-    var t0 = performance.now();
-    fetch("/health", { cache: "no-store" }).then(function (r) { return r.json(); }).then(function (h) {
-      health = h;
-      var ms = Math.round(performance.now() - t0);
-      setOnline(h.ok ? "ok" : "bad");
-      var onoff = function (v) { return v ? "on" : "off"; };
-      $("cards").innerHTML =
-        statCard("fa-solid fa-circle-check", h.ok ? "green" : "red", "Status", h.ok ? "online" : "setup needed", null, "flixora-proxy") +
-        statCard("fa-solid fa-bolt", h.edge_cache ? "yellow" : "orange", "Edge cache", onoff(h.edge_cache), null, h.edge_cache ? "chunks cached at the edge" : "custom domain needed") +
-        statCard("fa-solid fa-cubes", "purple", "Chunk size", h.chunk_mb + " MB", null, "max " + h.max_chunks + " chunks / req") +
-        statCard("fa-solid fa-key", h.download_token_check ? "green" : "orange", "Token check", onoff(h.download_token_check), null, "download gate") +
-        statCard("fa-solid fa-server", h.origins ? "link" : "red", "Origins", String(h.origins), null, "allowed backends") +
-        statCard("fa-solid fa-gauge-high", ms < 300 ? "green" : "orange", "Latency", ms + " ms", Math.min(100, Math.round(ms / 8)));
-      var notes = [];
-      if (!h.ok) notes.push("ALLOWED_ORIGINS is not configured.");
-      if (!h.edge_cache) notes.push("Edge cache is off - it only works on a custom domain, not *.workers.dev.");
-      if (h.backend_turnstile && !h.download_token_check) notes.push("Backend uses Turnstile but TURNSTILE_SECRET is missing here; downloads are passed through uncached.");
-      $("healthNote").textContent = notes.join(" ");
-      $("healthNote").className = "mig-warn" + (notes.length ? "" : " hide");
-      var rows = [
-        ["edge_cache", onoff(h.edge_cache)], ["chunk_mb", h.chunk_mb], ["max_chunks", h.max_chunks],
-        ["prefetch_next", onoff(h.prefetch_next)], ["cap_open_ranges", onoff(h.cap_open_ranges)],
-        ["backend_turnstile", onoff(h.backend_turnstile)], ["download_token_check", onoff(h.download_token_check)], ["origins", h.origins]
-      ];
-      $("cfg").innerHTML = rows.map(function (r) { return '<tr><td data-label="setting">' + r[0] + '</td><td data-label="value" style="color:var(--text)">' + esc(r[1]) + "</td></tr>"; }).join("");
-    }).catch(function () { setOnline("bad"); $("cards").innerHTML = '<div class="mig-err" style="grid-column:1/-1">Cannot reach /health</div>'; });
-  }
-  loadHealth(); setInterval(loadHealth, 30000);
-
-  /* mini charts (same idea as the dashboard's dependency-free SVG charts) */
-  var samples = [];
-  function drawChart() {
-    var W = 600, H = 180, P = 8;
-    var vals = samples.length ? samples : [0];
-    var max = Math.max.apply(null, vals.concat([256 * 1024])) * 1.2;
-    var step = (W - P * 2) / (vals.length - 1 || 1);
-    var pts = vals.map(function (v, i) { return (P + i * step) + "," + (P + (1 - v / max) * (H - P * 2)); });
-    var area = "M " + P + "," + (H - P) + " " + vals.map(function (v, i) { return "L " + (P + i * step) + "," + (P + (1 - v / max) * (H - P * 2)); }).join(" ") + " L " + (P + (vals.length - 1) * step) + "," + (H - P) + " Z";
-    var grid = "", labels = "";
-    [0, 0.25, 0.5, 0.75, 1].forEach(function (f) {
-      var y = P + (1 - f) * (H - P * 2);
-      grid += '<line x1="0" y1="' + y + '" x2="' + W + '" y2="' + y + '" stroke="var(--border)" vector-effect="non-scaling-stroke"/>';
-      labels += '<span style="position:absolute;left:4px;top:' + (y / H * 100) + '%;transform:translateY(-100%);font-size:10px;line-height:1.3;color:var(--text-faint);font-family:var(--font-mono);pointer-events:none">' + spd(f * max) + "</span>";
-    });
-    $("chart").innerHTML = '<div style="position:relative"><svg viewBox="0 0 ' + W + " " + H + '" style="width:100%;height:' + H + 'px;display:block" preserveAspectRatio="none">' + grid +
-      '<path d="' + area + '" fill="var(--state-success)" opacity="0.12"/><polyline points="' + pts.join(" ") + '" fill="none" stroke="var(--state-success)" stroke-width="2" stroke-linejoin="round" stroke-linecap="round" vector-effect="non-scaling-stroke"/></svg>' + labels + "</div>" +
-      '<div style="display:flex;gap:6px;align-items:center;margin-top:6px;font-size:11px;color:var(--text-dim)"><span style="width:9px;height:9px;border-radius:2px;background:var(--state-success);display:inline-block"></span>speed now &middot; last ' + vals.length + " samples</div>";
-  }
-  function drawDonut(hit, miss) {
-    var tot = hit + miss, pct = tot ? Math.round(hit * 100 / tot) : 0, r = 52, c = 2 * Math.PI * r;
-    $("donut").innerHTML = '<svg viewBox="0 0 140 140" width="150" height="150"><circle cx="70" cy="70" r="' + r + '" fill="none" stroke="var(--panel-raised)" stroke-width="14"/>' +
-      (pct > 0 ? '<circle cx="70" cy="70" r="' + r + '" fill="none" stroke="var(--accent-purple)" stroke-width="14" stroke-linecap="round" stroke-dasharray="' + (c * pct / 100) + " " + c + '" transform="rotate(-90 70 70)"/>' : "") +
-      '<text x="70" y="76" text-anchor="middle" fill="var(--text)" font-size="24" font-weight="600" font-family="IBM Plex Mono,monospace">' + (tot ? pct + "%" : "-") + "</text></svg>" +
-      '<div style="margin-top:8px;font-size:12px;color:var(--text-faint);font-family:var(--font-mono);text-align:center">' + hit + " hit / " + miss + " miss</div>";
-  }
-  drawChart(); drawDonut(0, 0);
-
-  /* ---------------- live log ---------------- */
-  var logFilter = "all", logAuto = true, logData = null, logBusy = false, askClear = 0;
-
-  function stateBadge(st) {
-    var map = { active: ["var(--state-success)", "live", 1], done: ["var(--accent-purple)", "done", 0], aborted: ["var(--state-running)", "stopped", 0], error: ["var(--state-error)", "error", 0], lost: ["var(--state-idle)", "lost", 0] };
-    var m = map[st] || ["var(--state-idle)", st, 0];
-    return '<span class="badge" style="color:' + m[0] + '"><span class="dot' + (m[2] ? " running" : "") + '" style="background:' + m[0] + '"></span>' + esc(m[1]) + "</span>";
-  }
-  function renderLog() {
-    if (!logData) return;
-    var now = logData.now, all = logData.entries || [];
-    var act = 0, tot = 0, hit = 0, miss = 0, nowBps = 0;
-    all.forEach(function (e) { if (e.state === "active") { act++; nowBps += e.bps || 0; } tot += e.sent; hit += e.hit; miss += e.miss; });
-    samples.push(nowBps); samples = samples.slice(-40);
-    drawChart(); drawDonut(hit, miss);
-    $("chartSub").textContent = act ? act + " active stream" + (act > 1 ? "s" : "") + " - " + spd(nowBps) : "No active streams";
-    $("logCards").innerHTML =
-      statCard("fa-solid fa-tower-broadcast", act ? "green" : "link", "Active now", String(act), null, all.length + " sessions logged") +
-      statCard("fa-solid fa-gauge-high", nowBps ? "green" : "purple", "Speed now", spd(nowBps), null, "all streams together") +
-      statCard("fa-solid fa-database", "pink", "Transferred", fmtBytes(tot), null, "since the log started") +
-      statCard("fa-solid fa-bolt", "yellow", "Cache hit rate", hit + miss ? Math.round(hit * 100 / (hit + miss)) + "%" : "-", hit + miss ? Math.round(hit * 100 / (hit + miss)) : null);
-    $("logMode").textContent = logData.mode === "durable"
-      ? "Stored in a Durable Object - last 60 sessions. Bytes are counted per finished chunk."
-      : "Memory mode (no Durable Object bound) - the log resets when the worker restarts and may split across instances.";
-
-    var list = all.filter(function (e) { return logFilter === "all" || e.kind === logFilter; });
-    if (!list.length) { $("logCard").innerHTML = '<div class="empty">No activity yet. Play or download something.</div>'; return; }
-    var rows = list.map(function (e) {
-      var pct = e.total > 0 ? Math.min(100, Math.round(e.sent * 100 / e.total)) : 0;
-      var isDl = e.kind === "download", isAct = e.state === "active";
-      var chip = '<span class="icon-chip" style="background:color-mix(in srgb,' + (isDl ? C.link : C.green) + ' 15%,transparent);color:' + (isDl ? C.link : C.green) + '"><i class="fa-solid ' + (isDl ? "fa-download" : "fa-play") + '"></i></span>';
-      return "<tr>" +
-        '<td class="nolabel"><div class="fcell">' + chip + '<div style="min-width:0"><div class="fname">' + esc(e.name) + '</div><div class="fsub">' + (isDl ? "download" : "play") + " &middot; " + e.reqs + " req &middot; " + dur(e.busy_ms) + " active</div></div></div></td>" +
-        '<td data-label="state">' + stateBadge(e.state) + (e.err ? '<div class="fsub" style="color:var(--state-error)">' + esc(e.err) + "</div>" : "") + "</td>" +
-        '<td data-label="progress"><div class="pbar"><span style="color:var(--text)">' + fmtBytes(e.sent) + "</span>" + (e.total ? " / " + fmtBytes(e.total) + " (" + pct + "%)" : "") +
-          '<div class="bar-track"><div class="bar-fill" style="width:' + pct + "%;background:" + (isAct ? C.green : C.purple) + '"></div></div></div></td>' +
-        '<td data-label="speed">' + (isAct ? '<span style="color:var(--state-success)">' + spd(e.bps) + "</span> &middot; " : "") + "avg " + spd(e.avg) + (e.peak ? '<div class="fsub">peak ' + spd(e.peak) + "</div>" : "") + "</td>" +
-        '<td data-label="cache">' + (e.hit + e.miss ? e.hit + " hit / " + e.miss + " miss" : "-") + "</td>" +
-        '<td data-label="client">' + esc([e.dev, e.country].filter(Boolean).join(" · ") || "unknown") + (e.client ? '<div class="fsub">#' + esc(e.client) + "</div>" : "") + "</td>" +
-        '<td data-label="when">' + ago(now, isAct ? e.t0 : e.upd) + "</td></tr>";
-    }).join("");
-    $("logCard").innerHTML = '<table class="data-table"><thead><tr><th>File</th><th>State</th><th>Progress</th><th>Speed</th><th>Cache</th><th>Client</th><th>When</th></tr></thead><tbody>' + rows + "</tbody></table>";
-  }
-  function pollLog() {
-    if (logBusy) return;
-    logBusy = true;
-    fetch("/logs.json", { cache: "no-store" }).then(function (r) {
-      if (r.status === 401) { location.reload(); return null; }
-      if (r.status === 403) { $("logCard").innerHTML = '<div class="empty">UI_USER / UI_PASS are not set on the worker</div>'; return null; }
-      return r.json();
-    }).then(function (d) {
-      if (!d) return;
-      logData = d; renderLog();
-    }).catch(function () {}).then(function () { logBusy = false; });
-  }
-  $("signOut").onclick = function () {
-    fetch("/logout", { method: "POST" }).then(function () { location.reload(); });
-  };
-  $("logAuto").onclick = function () {
-    logAuto = !logAuto;
-    $("logAuto").className = "act-btn" + (logAuto ? "" : " on");
-    $("logAuto").innerHTML = logAuto ? '<span class="dot running" style="background:var(--state-success)"></span>live' : '<i class="fa-solid fa-pause"></i>paused';
-    if (logAuto) pollLog();
-  };
-  $("logClr").onclick = function () {
-    var b = $("logClr");
-    if (!askClear) {
-      askClear = setTimeout(function () { askClear = 0; b.className = "act-btn danger"; b.innerHTML = '<i class="fa-solid fa-trash"></i>clear'; }, 2500);
-      b.className = "act-btn asking"; b.innerHTML = '<i class="fa-solid fa-trash"></i>tap again';
-      return;
-    }
-    clearTimeout(askClear); askClear = 0; b.className = "act-btn danger"; b.innerHTML = '<i class="fa-solid fa-trash"></i>clear';
-    fetch("/logs/clear", { method: "POST" }).then(function () { logData = null; samples = []; pollLog(); toast("Log cleared"); });
-  };
-  Array.prototype.forEach.call(document.querySelectorAll("[data-f]"), function (b) {
-    b.onclick = function () {
-      logFilter = b.getAttribute("data-f");
-      Array.prototype.forEach.call(document.querySelectorAll("[data-f]"), function (x) { x.className = "act-btn" + (x === b ? " on" : ""); });
-      renderLog();
-    };
-  });
-  pollLog();
-  setInterval(function () { if (logAuto && !document.hidden) pollLog(); }, 3000);
-
-  /* ---------------- setup page ---------------- */
-  $("e1").textContent = origin + "/https://api.example.com/dl/FILE_ID/name.mkv";
-  $("e2").textContent = origin + "/proxy/stream?d=" + encodeURIComponent("https://api.example.com/dl/FILE_ID/name.mkv");
-  Array.prototype.forEach.call(document.querySelectorAll("[data-copy]"), function (b) {
-    b.onclick = function () { copy($(b.getAttribute("data-copy")).textContent); };
-  });
-
-  /* ---------------- backend health, saved bytes, stats page, alerts ---------------- */
   function api(path, opt) {
     return fetch(path, Object.assign({ cache: "no-store" }, opt || {})).then(function (r) {
       if (r.status === 401) { location.reload(); return null; }
       return r.json().then(function (d) { d.__status = r.status; return d; }, function () { return { __status: r.status }; });
     });
   }
-  function ymd(d) { return d.slice(5).replace("-", "/"); }
-  function renderTodayCards(st, stats) {
-    var h = "";
-    if (st && st.backend) {
-      var b = st.backend;
-      h += statCard("fa-solid fa-hard-drive", b.up ? "green" : "red", "Backend (VPS)", b.up ? "up" : "DOWN", null, b.up ? b.ms + " ms" + (b.hosts > 1 ? " (slowest of " + b.hosts + ")" : "") : (b.host || "") + " " + (b.error || ""));
-    }
-    if (stats && stats.days) {
-      var t = stats.days.filter(function (x) { return x.d === stats.today; })[0] || { r: 0, b: 0, hb: 0, mb: 0, e: 0 };
-      var pct = t.b ? Math.round(t.hb * 100 / t.b) : 0;
-      h += statCard("fa-solid fa-piggy-bank", "green", "Saved today", fmtBytes(t.hb), null, t.b ? pct + "% of " + fmtBytes(t.b) + " came from the edge" : "no traffic yet");
-      h += statCard("fa-solid fa-server", "orange", "From VPS today", fmtBytes(t.mb), null, "fetched from your backend");
-      h += statCard("fa-solid fa-film", t.e ? "red" : "link", "Requests today", String(t.r), null, t.e ? t.e + " failed" : "none failed");
-    }
-    if (lastUsage) {
-      var rq = lastUsage.meters.req, rp = Math.min(100, Math.round(rq.used * 100 / rq.limit));
-      h += statCard("fa-solid fa-cloud", rp >= 95 ? "red" : rp >= 80 ? "orange" : "link", "CF requests today", fmtN(rq.used) + " / " + fmtN(rq.limit), rp);
-    }
-    $("cards2").innerHTML = h;
-  }
-  var lastStatus = null, lastStats = null;
-  function loadExtra() {
-    Promise.all([api("/status.json"), api("/stats.json")]).then(function (r) {
-      lastStatus = r[0] && r[0].backend ? r[0] : null; lastStats = r[1] && r[1].days ? r[1] : null;
-      renderTodayCards(lastStatus, lastStats);
-      renderAlerts(lastStatus);
-      renderStats(lastStats);
-    }).catch(function () {});
-  }
-  function renderAlerts(st) {
-    if (!st) return;
-    var row = function (k, v, col) { return '<tr><td data-label="setting">' + k + '</td><td data-label="value" style="color:' + (col || "var(--text)") + '">' + esc(v) + "</td></tr>"; };
-    $("alertRows").innerHTML =
-      row("telegram", st.telegram ? "configured" : "not set (TG_BOT_TOKEN + TG_CHAT_ID)", st.telegram ? C.green : C.orange) +
-      row("scheduled check", st.alerts_need_do ? "needs the LOGS Durable Object" : "every 5 min", st.alerts_need_do ? C.orange : C.green) +
-      row("alert on failures", st.alert_errors + " errors / 10 min") +
-      row("alert on low hit rate", st.alert_min_hit ? "below " + st.alert_min_hit + "%" : "off (ALERT_MIN_HIT_PCT)") +
-      row("blocked countries", st.blocked_countries && st.blocked_countries.length ? st.blocked_countries.join(", ") : "none (BLOCK_COUNTRIES)") +
-      row("heavy client alert", st.abuse_gb ? "over " + st.abuse_gb + " GB / hour (ABUSE_GB_PER_HOUR)" : "off") +
-      row("parallel connections", st.max_reqs ? "max " + st.max_reqs + " per client (MAX_CLIENT_REQS)" : "no limit") +
-      row("files at once", st.max_files ? "max " + st.max_files + " per client (MAX_CLIENT_FILES)" : "no limit") +
-      row("login lock", "5 wrong passwords = 15 min lock", C.green);
-  }
-  function renderStats(stats) {
-    if (!stats) return;
-    var days = stats.days, last14 = days.slice(-14), last7 = days.slice(-7);
-    var sum = function (a, k) { return a.reduce(function (n, x) { return n + (x[k] || 0); }, 0); };
-    var b7 = sum(last7, "b"), hb7 = sum(last7, "hb"), r7 = sum(last7, "r"), e7 = sum(last7, "e"), x7 = sum(last7, "x"), h7 = sum(last7, "h"), m7 = sum(last7, "m");
-    $("statCards").innerHTML =
-      statCard("fa-solid fa-piggy-bank", "green", "Saved (7 days)", fmtBytes(hb7), null, b7 ? Math.round(hb7 * 100 / b7) + "% of " + fmtBytes(b7) : "no traffic yet") +
-      statCard("fa-solid fa-database", "pink", "Sent (7 days)", fmtBytes(b7), null, r7 + " requests") +
-      statCard("fa-solid fa-bolt", "yellow", "Chunk hit rate", h7 + m7 ? Math.round(h7 * 100 / (h7 + m7)) + "%" : "-", h7 + m7 ? Math.round(h7 * 100 / (h7 + m7)) : null) +
-      statCard("fa-solid fa-triangle-exclamation", e7 ? "red" : "green", "Failed (7 days)", String(e7), null, r7 ? Math.round(e7 * 100 / r7) + "% of requests" : "") +
-      statCard("fa-solid fa-hand", x7 ? "orange" : "green", "Limited (7 days)", String(x7), null, x7 ? "refused with 429 (per-client limits)" : "nobody hit the limits");
-    // 14 day stacked bars (div based, so they follow the theme)
-    var byDay = {}; days.forEach(function (x) { byDay[x.d] = x; });
-    var keys = [], base = new Date(stats.today + "T00:00:00Z");
-    for (var i = 13; i >= 0; i--) { keys.push(new Date(base.getTime() - i * 86400000).toISOString().slice(0, 10)); }
-    var max = Math.max.apply(null, keys.map(function (k) { return byDay[k] ? byDay[k].b : 0; }).concat([1]));
-    $("dayChart").innerHTML = '<div class="dbars">' + keys.map(function (k) {
-      var x = byDay[k] || { b: 0, hb: 0, mb: 0 }, tot = x.hb + x.mb || x.b, hpx = tot ? (x.b / max * 100) : 0;
-      var ep = tot ? x.hb / tot : 0;
-      return '<div class="dbar" title="' + esc(k + " - " + fmtBytes(x.b) + " (" + fmtBytes(x.hb) + " from edge)") + '"><i class="v" style="height:' + (hpx * (1 - ep)) + '%"></i><i class="e" style="height:' + (hpx * ep) + '%"></i></div>';
-    }).join("") + '</div><div class="dlabels">' + keys.map(function (k, i) { return "<span>" + (i % 2 ? "" : ymd(k)) + "</span>"; }).join("") + '</div>' +
-      '<div class="leg"><span><b style="background:var(--accent-purple)"></b>from edge cache</span><span><b style="background:var(--state-running)"></b>from VPS</span></div>';
-    var rows = days.slice().reverse().map(function (x) {
-      var pct = x.b ? Math.round(x.hb * 100 / x.b) : 0;
-      return "<tr>" +
-        '<td class="nolabel" style="color:var(--text)">' + esc(x.d) + (x.d === stats.today ? ' <span class="fsub" style="display:inline">today</span>' : "") + "</td>" +
-        '<td data-label="requests">' + x.r + "</td>" +
-        '<td data-label="sent">' + fmtBytes(x.b) + "</td>" +
-        '<td data-label="from edge"><span><span style="color:var(--accent-purple)">' + fmtBytes(x.hb) + "</span> (" + pct + "%)</span></td>" +
-        '<td data-label="from VPS"><span style="color:var(--state-running)">' + fmtBytes(x.mb) + "</span></td>" +
-        '<td data-label="failed">' + (x.e ? '<span style="color:var(--state-error)">' + x.e + "</span>" : "0") + "</td></tr>";
-    }).join("");
-    $("dayCard").innerHTML = rows ? '<table class="data-table"><thead><tr><th>Day</th><th>Requests</th><th>Sent</th><th>From edge</th><th>From VPS</th><th>Failed</th></tr></thead><tbody>' + rows + "</tbody></table>" : '<div class="empty">No traffic recorded yet.</div>';
-    var files = {};
-    last7.forEach(function (x) { Object.keys(x.f || {}).forEach(function (n) { var f = files[n] || (files[n] = [0, 0]); f[0] += x.f[n][0]; f[1] += x.f[n][1]; }); });
-    var top = Object.keys(files).sort(function (a, b) { return files[b][0] - files[a][0]; }).slice(0, 10);
-    $("topCard").innerHTML = top.length ? '<div class="pad" style="padding-bottom:0"><div class="mig-title"><i class="fa-solid fa-ranking-star" style="color:var(--accent-pink)"></i>top files (7 days)</div></div><table class="data-table"><thead><tr><th>Top files (7 days)</th><th>Sent</th><th>Requests</th></tr></thead><tbody>' +
-      top.map(function (n) { return '<tr><td class="nolabel"><div class="fname">' + esc(n) + '</div></td><td data-label="sent">' + fmtBytes(files[n][0]) + '</td><td data-label="requests">' + files[n][1] + "</td></tr>"; }).join("") + "</tbody></table>" : "";
-    var hv = stats.heavy || [];
-    $("heavyCard").innerHTML = hv.length ? '<div class="pad" style="padding-bottom:0"><div class="mig-title"><i class="fa-solid fa-user-clock" style="color:var(--state-running)"></i>heavy clients (last hour)</div></div><table class="data-table"><thead><tr><th>Heavy clients (last hour)</th><th>Sent</th><th>Latest file</th></tr></thead><tbody>' +
-      hv.map(function (x) {
-        var over = stats.abuse_gb && x.bytes >= stats.abuse_gb * 1073741824;
-        return '<tr><td class="nolabel"><div class="fname">#' + esc(x.client) + '</div><div class="fsub">' + esc([x.dev, x.country].filter(Boolean).join(" · ") || "unknown") + "</div></td>" +
-          '<td data-label="sent"><span style="color:' + (over ? "var(--state-error)" : "var(--text)") + '">' + fmtBytes(x.bytes) + "</span></td>" +
-          '<td data-label="file">' + esc(x.name || "-") + "</td></tr>";
-      }).join("") + "</tbody></table>" : "";
-    $("statsMode").textContent = stats.mode === "durable" ? "Daily totals are kept for 31 days in the Durable Object. Days follow STATS_TZ_MIN (default Sri Lanka)." : "Memory mode (no Durable Object) - daily totals reset when the worker restarts.";
-  }
-  loadExtra(); setInterval(function () { if (!document.hidden) loadExtra(); }, 30000);
-
-  $("tgTest").onclick = function () {
-    api("/alerts/test", { method: "POST" }).then(function (d) { toast(d && d.ok ? "Test alert sent" : (d && d.error) || "Failed"); });
+  $("signOut").onclick = function () {
+    fetch("/logout", { method: "POST" }).then(function () { location.reload(); });
   };
+  function fmtN(n) { return Math.round(Number(n) || 0).toLocaleString("en-US"); }
+  function pctOf(m) { return m.limit > 0 ? Math.min(100, Math.round(m.used * 100 / m.limit)) : 0; }
+
+  /* ---------------- overview: loaded when opened and on refresh, never polled (every request counts against the Free plan) ---------------- */
+  function loadOverview() {
+    $("ovRefresh").disabled = true;
+    Promise.all([api("/health"), api("/status.json"), api("/stats.json"), api("/usage.json")]).then(function (r) {
+      var h = r[0] || {}, st = r[1] && r[1].backend ? r[1] : null, stats = r[2] && r[2].days ? r[2] : null, u = r[3] && r[3].meters ? r[3] : null;
+      var onoff = function (v) { return v ? "on" : "off"; };
+      var col = h.ok ? "var(--state-success)" : "var(--state-error)";
+      $("pillDot").style.background = col;
+      $("sideState").innerHTML = '<span class="dot" style="background:' + col + '"></span><span style="color:' + col + '">' + (h.ok ? "online" : "needs attention") + "</span>";
+      var c1 = statCard("fa-solid fa-circle-check", h.ok ? "green" : "red", "Status", h.ok ? "online" : "setup needed", null, h.origins + " allowed backend" + (h.origins === 1 ? "" : "s"));
+      if (st) {
+        var b = st.backend;
+        c1 += statCard("fa-solid fa-hard-drive", b.up ? "green" : "red", "Backend (VPS)", b.up ? "up" : "DOWN", null, b.up ? b.ms + " ms" : (b.host || "") + " " + (b.error || ""));
+      }
+      c1 += statCard("fa-solid fa-bolt", h.edge_cache ? "yellow" : "orange", "Edge cache", onoff(h.edge_cache), null, h.edge_cache ? "chunk " + h.chunk_mb + " MB" : "custom domain needed");
+      c1 += statCard("fa-solid fa-key", h.download_token_check ? "green" : "orange", "Token check", onoff(h.download_token_check), null, "download gate");
+      $("cards").innerHTML = c1;
+      var notes = [];
+      if (!h.ok) notes.push("ALLOWED_ORIGINS is not configured.");
+      if (h.edge_cache === false) notes.push("Edge cache is off - it only works on a custom domain, not *.workers.dev.");
+      if (h.backend_turnstile && !h.download_token_check) notes.push("Backend uses Turnstile but TURNSTILE_SECRET is missing here; downloads are passed through uncached.");
+      $("healthNote").textContent = notes.join(" ");
+      $("healthNote").className = "mig-warn" + (notes.length ? "" : " hide");
+
+      if (stats) {
+        var t = stats.days.filter(function (x) { return x.d === stats.today; })[0] || { r: 0, b: 0, hb: 0, mb: 0, e: 0 };
+        $("cards3").innerHTML =
+          statCard("fa-solid fa-piggy-bank", "green", "Saved today", fmtBytes(t.hb), null, t.b ? Math.round(t.hb * 100 / t.b) + "% of " + fmtBytes(t.b) + " from the edge" : "no traffic yet") +
+          statCard("fa-solid fa-server", "orange", "From VPS today", fmtBytes(t.mb), null, "fetched from your backend") +
+          statCard("fa-solid fa-film", t.e ? "red" : "link", "Streams today", String(t.r), null, t.e ? t.e + " failed" : "none failed");
+      }
+      if (u) renderLimits(u);
+      $("ovAge").textContent = "updated " + new Date().toLocaleTimeString("en-GB", { hour12: false });
+    }).catch(function () {
+      $("cards").innerHTML = '<div class="mig-err" style="grid-column:1/-1">Cannot reach the worker</div>';
+    }).then(function () { $("ovRefresh").disabled = false; });
+  }
+  $("ovRefresh").onclick = loadOverview;
+  function renderLimits(u) {
+    var req = u.meters.req, dob = u.meters["do"], rows = u.meters.rows, F = u.free;
+    var reset = new Date(u.reset_at).toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit" });
+    $("cards2").innerHTML =
+      statCard("fa-solid fa-cloud", "link", "Worker requests", fmtN(req.used) + " / " + fmtN(req.limit), pctOf(req)) +
+      statCard("fa-solid fa-cubes-stacked", "purple", "Durable Object requests", fmtN(dob.used) + " / " + fmtN(dob.limit), pctOf(dob)) +
+      statCard("fa-solid fa-pen-to-square", "pink", "DO rows written (est.)", fmtN(rows.used) + " / " + fmtN(rows.limit), pctOf(rows)) +
+      statCard("fa-solid fa-hourglass-half", "orange", "Resets in", dur(Math.max(0, u.reset_at - u.now)), null, "00:00 UTC = " + reset + " your time");
+    var worst = Math.max(pctOf(req), pctOf(dob), pctOf(rows)), notes = [];
+    if (u.warn_pct > 0 && worst >= u.warn_pct) notes.push("A Cloudflare Free limit is at " + worst + "% for today. When a limit is reached Cloudflare stops answering until 00:00 UTC.");
+    if (u.projected && u.projected > req.limit) notes.push("At this pace about " + fmtN(u.projected) + " requests will be used by the end of the day.");
+    $("limNote").textContent = notes.join(" ");
+    $("limNote").className = "mig-warn" + (notes.length ? "" : " hide");
+    var row = function (k, free, mine) { return '<tr><td data-label="limit" style="color:var(--text)">' + k + '</td><td data-label="Free plan">' + free + '</td><td data-label="this worker">' + mine + "</td></tr>"; };
+    $("limTable").innerHTML = '<table class="data-table"><thead><tr><th>Limit</th><th>Free plan</th><th>This worker</th></tr></thead><tbody>' +
+      row("Worker requests", fmtN(F.workerRequestsDay) + " / day", fmtN(req.used) + " (" + pctOf(req) + "%)") +
+      row("Burst rate", fmtN(F.burstPerMinute) + " requests / minute", "over it: Cloudflare error 1015") +
+      row("CPU time", F.cpuMs + " ms / request", "bodies are piped natively") +
+      row("Subrequests", F.subrequests + " external / request", "budget " + u.sub_budget) +
+      row("DO requests", fmtN(F.doRequestsDay) + " / day", fmtN(dob.used) + " (" + pctOf(dob) + "%)") +
+      row("DO rows written", fmtN(F.doRowsWrittenDay) + " / day", fmtN(rows.used) + " (" + pctOf(rows) + "%)") + "</tbody></table>";
+    $("limHint").textContent = "Counted by this worker (every request it receives, including this page), so it can differ a little from the Cloudflare dashboard. Nothing on this page refreshes by itself. The limit and alert level are on the Config page.";
+  }
+
   var purgeAsk = 0;
   $("tPurge").onclick = function () {
     var b = $("tPurge");
@@ -860,6 +588,7 @@ select.field{cursor:pointer}
   $("tHead").onclick = function () { run("head"); };
   $("tRange").onclick = function () { run("range"); };
 
+
   /* ---------------- confirm dialog ---------------- */
   var mResolve = null;
   function closeBox(v) {
@@ -884,49 +613,6 @@ select.field{cursor:pointer}
   $("mBack").addEventListener("click", function (e) { if (e.target === $("mBack")) closeBox(false); });
   document.addEventListener("keydown", function (e) { if (e.key === "Escape" && mResolve) closeBox(false); });
 
-  /* ---------------- Cloudflare limits page ---------------- */
-  var lastUsage = null;
-  function fmtN(n) { return Math.round(Number(n) || 0).toLocaleString("en-US"); }
-  function pctOf(m) { return m.limit > 0 ? Math.min(100, Math.round(m.used * 100 / m.limit)) : 0; }
-  function renderLimits(u) {
-    var req = u.meters.req, dob = u.meters["do"], rows = u.meters.rows, F = u.free;
-    var reset = new Date(u.reset_at).toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit" });
-    $("limCards").innerHTML =
-      statCard("fa-solid fa-cloud", "link", "Worker requests today", fmtN(req.used) + " / " + fmtN(req.limit), pctOf(req)) +
-      statCard("fa-solid fa-cubes-stacked", "purple", "Durable Object requests", fmtN(dob.used) + " / " + fmtN(dob.limit), pctOf(dob)) +
-      statCard("fa-solid fa-pen-to-square", "pink", "DO rows written (est.)", fmtN(rows.used) + " / " + fmtN(rows.limit), pctOf(rows)) +
-      statCard("fa-solid fa-hourglass-half", "orange", "Resets in", dur(Math.max(0, u.reset_at - u.now)), null, "00:00 UTC = " + reset + " your time");
-    var worst = Math.max(pctOf(req), pctOf(dob), pctOf(rows)), notes = [];
-    if (u.warn_pct > 0 && worst >= u.warn_pct) notes.push("A Cloudflare Free limit is at " + worst + "% for today. When a limit is reached Cloudflare stops answering until 00:00 UTC.");
-    if (u.projected && u.projected > req.limit) notes.push("At this pace about " + fmtN(u.projected) + " requests will be used by the end of the day.");
-    $("limNote").textContent = notes.join(" ");
-    $("limNote").className = "mig-warn" + (notes.length ? "" : " hide");
-    var row = function (k, free, mine) { return "<tr><td data-label=\"limit\" style=\"color:var(--text)\">" + k + "</td><td data-label=\"Free plan\">" + free + "</td><td data-label=\"this worker\">" + mine + "</td></tr>"; };
-    var pc = function (m) { return fmtN(m.used) + " (" + pctOf(m) + "%)"; };
-    $("limTable").innerHTML = "<table class=\"data-table\"><thead><tr><th>Limit</th><th>Free plan</th><th>This worker</th></tr></thead><tbody>" +
-      row("Worker requests", fmtN(F.workerRequestsDay) + " / day", pc(req) + (u.projected ? " &middot; ~" + fmtN(u.projected) + " by day end" : "")) +
-      row("Burst rate", fmtN(F.burstPerMinute) + " requests / minute", "over it Cloudflare answers error 1015") +
-      row("CPU time", F.cpuMs + " ms / request", "bodies are piped natively, no per-byte JS") +
-      row("Subrequests", F.subrequests + " external / request", "budget " + u.sub_budget + (u.sub_reserved ? " (" + u.sub_reserved + " kept for the log)" : "")) +
-      row("Worker memory", F.memoryMB + " MB", "chunk size " + u.chunk_mb + " MB") +
-      row("Worker size", F.scriptMB + " MB compressed", "small") +
-      row("Durable Object requests", fmtN(F.doRequestsDay) + " / day", pc(dob)) +
-      row("DO rows written", fmtN(F.doRowsWrittenDay) + " / day", pc(rows) + " &middot; estimate") +
-      row("DO rows read", fmtN(F.doRowsReadDay) + " / day", "not counted (state is served from memory)") +
-      row("DO storage", F.doStorageGB + " GB", "a few KB") + "</tbody></table>";
-    $("limHint").textContent = "Requests are counted by this worker itself (every request it receives, including this page; the 5-minute check is not included), so the numbers can differ a little from the Cloudflare dashboard. " +
-      "All daily limits reset at 00:00 UTC. The limit and the Telegram alert level are editable on the Config page." +
-      (u.mode === "memory" ? " Memory mode (no Durable Object): counts are per worker instance and reset when it restarts." : "");
-  }
-  function loadUsage() {
-    api("/usage.json").then(function (u) {
-      if (!u || !u.meters) return;
-      lastUsage = u;
-      renderLimits(u);
-      renderTodayCards(lastStatus, lastStats);
-    }).catch(function () {});
-  }
-  loadUsage(); setInterval(function () { if (!document.hidden) loadUsage(); }, 30000);
 
   /* ---------------- config page (edit settings from the UI) ---------------- */
   var cfgData = null, cfgEdits = {};
@@ -1014,7 +700,7 @@ select.field{cursor:pointer}
       }
       if (d.__status >= 400 || !d.ok) { toast(d.error || "Save failed"); return; }
       cfgData.fields = d.fields; cfgData.log = d.log; cfgData.apply_s = d.apply_s; cfgEdits = {};
-      renderConfig(); loadHealth(); loadExtra(); loadUsage();
+      renderConfig();
       toast(d.changes.length ? "Saved " + d.changes.length + " change" + (d.changes.length === 1 ? "" : "s") : "Nothing changed");
     }).catch(function () { $("cfgSave").disabled = false; toast("Save failed"); });
   }
@@ -1063,6 +749,7 @@ select.field{cursor:pointer}
     }).then(function (ok) { if (ok) saveConfig({ all: true }); });
   };
   loadConfig();
+
 
   go(location.hash.slice(1) || "overview", false);
 })();
