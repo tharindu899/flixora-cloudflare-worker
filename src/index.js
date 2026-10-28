@@ -16,8 +16,7 @@
 import { UI_HTML } from "./ui.js";
 import { loginHtml } from "./login.js";
 import { authConfigured, checkLogin, isAuthed, sessionCookie, clearCookie, lockStatus, lockFail, lockClear, memLocks } from "./auth.js";
-import { applyEvent, snapshot, uaLabel, memEntries, memDays, memErrs, memUsage, addDaily, noteError, noteUsage, statsView, abuseLimitBytes, heavyClients, gateDecision, addDenied, bumpCf, cfView, memCf } from "./log.js";
-import { FREE } from "./config.js";
+import { applyEvent, snapshot, uaLabel, memEntries, memDays, memErrs, memUsage, addDaily, noteError, noteUsage, statsView, abuseLimitBytes, heavyClients, gateDecision, addDenied, bumpCf, cfView, memCf, FREE } from "./log.js";
 import { alertConfig, pingBackends, sendTelegram, telegramReady } from "./alerts.js";
 
 export { LogHub } from "./log.js";

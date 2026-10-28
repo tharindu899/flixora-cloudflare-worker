@@ -9,7 +9,20 @@
 
 import { evaluate, sendTelegram } from "./alerts.js";
 import { lockStatus, lockFail, lockClear } from "./auth.js";
-import { FREE } from "./config.js";
+
+/** Cloudflare Free plan limits (developers.cloudflare.com). Daily limits reset at 00:00 UTC. */
+export const FREE = {
+  workerRequestsDay: 100000,
+  burstPerMinute: 1000,
+  cpuMs: 10,
+  subrequests: 50,
+  doRequestsDay: 100000,
+  doRowsWrittenDay: 100000,
+  doRowsReadDay: 5000000,
+  doStorageGB: 5,
+  memoryMB: 128,
+  scriptMB: 3,
+};
 
 export const MAX_ENTRIES = 60;
 const SESSION_GAP = 10 * 60 * 1000; // a new session starts after 10 min of silence

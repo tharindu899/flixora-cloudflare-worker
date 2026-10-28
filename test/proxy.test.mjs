@@ -636,8 +636,7 @@ test("status.json reports the limits", async () => {
 });
 
 // ---------------------------------------------------------------- UI-editable settings + Cloudflare Free limits
-const { FREE } = await import("../src/config.js");
-const { bumpCf, cfView } = await import("../src/log.js");
+const { FREE, bumpCf, cfView } = await import("../src/log.js");
 
 const makeHub = (baseEnv, kv = new Map()) => {
   const hub = new LogHub(
