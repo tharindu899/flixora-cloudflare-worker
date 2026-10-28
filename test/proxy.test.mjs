@@ -60,7 +60,7 @@ globalThis.caches = {
   },
 };
 
-const { default: worker, resetConfigCache } = await import("../src/index.js");
+const { default: worker } = await import("../src/index.js");
 
 const ENV = { ALLOWED_ORIGINS: HOST, CHUNK_MB: "1", MAX_CHUNKS: "3", ENABLE_CACHE: "true", TURNSTILE_SECRET: SECRET };
 
@@ -77,7 +77,6 @@ const plain = (p = `/dl/${FILE_ID}/movie.mkv`) => `/https://${HOST}${p}`;
 const resetAll = () => {
   store.clear();
   originCalls = [];
-  resetConfigCache();
 };
 
 function makeToken(fileId, expires = Math.floor(Date.now() / 1000) + 600) {
@@ -297,10 +296,10 @@ test("UI page shows the sign-in form until logged in; logout clears the cookie",
   let r = await call("/ui", { env: LOGENV });
   let html = new TextDecoder().decode(r.body);
   assert.match(html, /Sign in/);
-  assert.doesNotMatch(html, /Link tester/);
+  assert.doesNotMatch(html, /Cloudflare Free plan today/);
   r = await call("/ui", { env: LOGENV, headers: { cookie: AUTH } });
   html = new TextDecoder().decode(r.body);
-  assert.match(html, /Link tester/);
+  assert.match(html, /Cloudflare Free plan today/);
   r = await call("/logout", { env: LOGENV, method: "POST" });
   assert.match(r.res.headers.get("set-cookie"), /Max-Age=0/);
 });
@@ -497,30 +496,6 @@ test("Telegram test button needs the secrets and a login", async () => {
   assert.equal(tgSent.length, 1);
 });
 
-test("purge removes every cached chunk of a file (works with a backend link or a proxy link)", async () => {
-  resetAll();
-  await call(plain(), { env: LOGENV, headers: { Range: "bytes=0-" } }); // caches MAX_CHUNKS=3 chunks
-  const countFile = () => [...store.keys()].filter((k) => k.includes(`/${FILE_ID}`)).length;
-  assert.ok(countFile() >= 4); // meta + chunks
-  assert.equal((await call("/purge", { env: LOGENV, method: "POST", headers: { "content-type": "application/json" }, payload: "{}" })).res.status, 401);
-  assert.equal((await postJson("/purge", { url: "" })).res.status, 400);
-  assert.equal((await postJson("/purge", { url: "https://evil.example.com/dl/x/y.mkv" })).res.status, 403);
-  const r = await postJson("/purge", { url: `https://${HOST}/dl/${FILE_ID}/movie.mkv` });
-  const d = jsonOf(r);
-  assert.equal(d.total, 6);
-  assert.equal(d.next, null);
-  assert.ok(d.deleted >= 3);
-  assert.equal(countFile(), 0);
-  // same through the proxy link
-  await call(plain(), { env: LOGENV, headers: { Range: "bytes=0-" } });
-  const d2 = jsonOf(await postJson("/purge", { url: `https://stream.example.org${plain()}` }));
-  assert.equal(d2.next, null);
-  assert.equal(countFile(), 0);
-  originCalls = [];
-  const again = await call(plain(), { env: LOGENV, headers: { Range: "bytes=0-10" } });
-  assert.equal(again.res.headers.get("x-flx-cache"), "MISS");
-});
-
 test("BLOCK_COUNTRIES blocks proxy traffic but never the UI or login", async () => {
   resetAll();
   const env = { ...LOGENV, BLOCK_COUNTRIES: "CN, ru" };
@@ -661,7 +636,7 @@ test("status.json reports the limits", async () => {
 });
 
 // ---------------------------------------------------------------- UI-editable settings + Cloudflare Free limits
-const { validateValue, FIELD_MAP, applyChanges, describeFields, FREE } = await import("../src/config.js");
+const { FREE } = await import("../src/config.js");
 const { bumpCf, cfView } = await import("../src/log.js");
 
 const makeHub = (baseEnv, kv = new Map()) => {
@@ -672,144 +647,6 @@ const makeHub = (baseEnv, kv = new Map()) => {
   const LOGS = { idFromName: (n) => n, get: () => ({ fetch: (u, init) => hub.fetch(new Request(u, init)) }) };
   return { kv, hub, LOGS };
 };
-
-test("settings validation: every type normalizes or explains what is wrong", () => {
-  const v = (key, raw) => validateValue(FIELD_MAP[key], raw);
-  assert.deepEqual(v("CHUNK_MB", " 8 "), { ok: true, value: "8" });
-  assert.equal(v("CHUNK_MB", "0").ok, false);
-  assert.equal(v("CHUNK_MB", "33").ok, false);
-  assert.equal(v("CHUNK_MB", "4.5").ok, false);
-  assert.equal(v("MAX_CLIENT_REQS", "0").ok, true); // 0 = no limit
-  assert.equal(v("STATS_TZ_MIN", "-300").ok, true);
-  assert.deepEqual(v("ABUSE_GB_PER_HOUR", "0.5"), { ok: true, value: "0.5" });
-  assert.equal(v("PREFETCH_NEXT", "ON").value, "true");
-  assert.equal(v("PREFETCH_NEXT", "off").value, "false");
-  assert.equal(v("PREFETCH_NEXT", "maybe").ok, false);
-  assert.equal(v("ENABLE_CACHE", "AUTO").value, "auto");
-  assert.equal(v("ENABLE_CACHE", "sometimes").ok, false);
-  assert.equal(v("BLOCK_COUNTRIES", "cn, ru ,CN").value, "CN,RU");
-  assert.equal(v("BLOCK_COUNTRIES", "").value, "");
-  assert.equal(v("BLOCK_COUNTRIES", "usa").ok, false);
-  assert.equal(v("ALLOWED_ORIGINS", "https://API.Example.com/").value, "api.example.com");
-  assert.equal(v("ALLOWED_ORIGINS", "a.example.com, b.example.com").value, "a.example.com,b.example.com");
-  assert.equal(v("ALLOWED_ORIGINS", "").ok, false); // would lock everybody out
-  assert.equal(v("ALLOWED_ORIGINS", "api.example.com/dl").ok, false);
-  assert.equal(v("ORIGIN_URL", "").value, "");
-  assert.equal(v("ORIGIN_URL", "https://api.example.com/").value, "https://api.example.com");
-  assert.equal(v("ORIGIN_URL", "http://api.example.com").ok, false);
-  assert.equal(v("CF_REQ_LIMIT", "100000").ok, true);
-  assert.equal(v("CF_WARN_PCT", "101").ok, false);
-  assert.equal(Object.keys(FIELD_MAP).some((k) => /SECRET|PASS|TOKEN|USER/.test(k)), false, "secrets can never be edited from the UI");
-});
-
-test("applyChanges: a value equal to wrangler.toml is no override, unknown keys are refused, reset and reset-all work", () => {
-  const env = { CHUNK_MB: "4", ALLOWED_ORIGINS: "api.example.com" };
-  let r = applyChanges(env, {}, { set: { CHUNK_MB: "8", MAX_CHUNKS: "12" } });
-  assert.deepEqual(r.values, { CHUNK_MB: "8" }); // MAX_CHUNKS 12 is the default -> not stored
-  assert.deepEqual(r.changes, [{ key: "CHUNK_MB", from: "4", to: "8" }]);
-  r = applyChanges(env, r.values, { set: { CHUNK_MB: "4" } });
-  assert.deepEqual(r.values, {});
-  assert.deepEqual(r.changes, [{ key: "CHUNK_MB", from: "8", to: "4" }]);
-  assert.equal(applyChanges(env, {}, { set: { UI_PASS: "x" } }).ok, false);
-  assert.equal(applyChanges(env, {}, { set: { CHUNK_MB: "99" } }).errors.CHUNK_MB.length > 0, true);
-  const cur = { CHUNK_MB: "8", BLOCK_COUNTRIES: "CN" };
-  assert.deepEqual(applyChanges(env, cur, { reset: ["CHUNK_MB"] }).values, { BLOCK_COUNTRIES: "CN" });
-  r = applyChanges(env, cur, { all: true });
-  assert.deepEqual(r.values, {});
-  assert.equal(r.changes.length, 2);
-  const f = describeFields(env, { CHUNK_MB: "8" }).find((x) => x.key === "CHUNK_MB");
-  assert.deepEqual([f.base, f.value, f.edited], ["4", "8", true]);
-});
-
-test("config API: login + Durable Object + confirmation needed, bad values refused, change applies at once, reset works", async () => {
-  resetAll();
-  assert.equal((await call("/config.json", { env: LOGENV })).res.status, 401);
-  assert.equal((await postJson("/config", { set: { CHUNK_MB: "2" }, confirm: true }, { ...LOGENV })).res.status, 409); // memory mode: nowhere to store it
-  assert.equal(jsonOf(await call("/config.json", { env: LOGENV, headers: { cookie: AUTH } })).editable, false);
-
-  const { LOGS } = makeHub({ ...LOGENV });
-  const env = { ...LOGENV, LOGS };
-  const fields = async () => jsonOf(await call("/config.json", { env, headers: { cookie: AUTH } }));
-  const chunk = async () => (await fields()).fields.find((f) => f.key === "CHUNK_MB");
-  assert.equal((await fields()).editable, true);
-  assert.deepEqual([(await chunk()).base, (await chunk()).edited], ["1", false]);
-
-  // no confirmation -> nothing happens
-  assert.equal((await postJson("/config", { set: { CHUNK_MB: "2" } }, env)).res.status, 400);
-  assert.equal((await postJson("/config", { set: { CHUNK_MB: "2" }, confirm: "yes" }, env)).res.status, 400);
-  assert.equal((await chunk()).edited, false);
-  // not JSON / not logged in
-  assert.equal((await call("/config", { env, method: "POST", payload: "{}" })).res.status, 401);
-  assert.equal((await call("/config", { env, method: "POST", headers: { cookie: AUTH }, payload: "{}" })).res.status, 400);
-  // bad values are refused with a reason per setting, and nothing is saved
-  const bad = await postJson("/config", { set: { CHUNK_MB: "99", BLOCK_COUNTRIES: "xx1", ALLOWED_ORIGINS: "ok.example.com" }, confirm: true }, env);
-  assert.equal(bad.res.status, 422);
-  const errs = jsonOf(bad).errors;
-  assert.ok(errs.CHUNK_MB && errs.BLOCK_COUNTRIES && !errs.ALLOWED_ORIGINS);
-  assert.equal((await chunk()).edited, false);
-
-  // a good change is stored and used by the very next request
-  const ok = await postJson("/config", { set: { CHUNK_MB: "2", MAX_CLIENT_FILES: "9" }, confirm: true }, env);
-  assert.equal(ok.res.status, 200);
-  assert.deepEqual(jsonOf(ok).changes.map((c) => c.key), ["CHUNK_MB", "MAX_CLIENT_FILES"]);
-  assert.equal(jsonOf(await call("/health", { env })).chunk_mb, 2);
-  const c2 = await chunk();
-  assert.deepEqual([c2.base, c2.value, c2.edited], ["1", "2", true]);
-  assert.equal(jsonOf(await call("/status.json", { env, headers: { cookie: AUTH } })).max_files, 9);
-
-  // 2 MB chunks really are used for the stream (cache keys follow the chunk size)
-  resetAll();
-  await call(plain(), { env, headers: { Range: "bytes=0-9" } });
-  assert.ok([...store.keys()].some((k) => k.includes("/2/")), "chunk size 2 in the cache key");
-
-  // typing the wrangler.toml value again removes the override
-  await postJson("/config", { set: { CHUNK_MB: "1" }, confirm: true }, env);
-  assert.equal((await chunk()).edited, false);
-  assert.equal(jsonOf(await call("/health", { env })).chunk_mb, 1);
-  // reset everything
-  await postJson("/config", { set: { MAX_CHUNKS: "7", BLOCK_COUNTRIES: "CN" }, confirm: true }, env);
-  assert.equal(jsonOf(await call("/health", { env })).max_chunks, 7);
-  const all = await postJson("/config", { all: true, confirm: true }, env);
-  assert.equal(jsonOf(all).fields.some((f) => f.edited), false);
-  assert.equal(jsonOf(await call("/health", { env })).max_chunks, 3);
-  assert.ok((await fields()).log.length >= 4, "changes are listed");
-  resetConfigCache();
-});
-
-test("edited settings change how traffic is handled (allowed hosts, blocked countries) and survive a Durable Object restart", async () => {
-  resetAll();
-  const { kv, LOGS } = makeHub({ ...LOGENV });
-  const env = { ...LOGENV, LOGS };
-  assert.equal((await call(plain(), { env, headers: { Range: "bytes=0-9" } })).res.status, 206);
-  await postJson("/config", { set: { ALLOWED_ORIGINS: "other.example.com" }, confirm: true }, env);
-  assert.equal((await call(plain(), { env, headers: { Range: "bytes=0-9" } })).res.status, 403);
-  assert.equal((await call("/ui", { env, headers: { cookie: AUTH } })).res.status, 200, "the UI stays reachable");
-  await postJson("/config", { reset: ["ALLOWED_ORIGINS"], set: { BLOCK_COUNTRIES: "lk" }, confirm: true }, env);
-  assert.equal((await call(plain(), { env, headers: { Range: "bytes=0-9", "cf-ipcountry": "LK" } })).res.status, 403);
-  assert.equal((await call(plain(), { env, headers: { Range: "bytes=0-9", "cf-ipcountry": "DE" } })).res.status, 206);
-  // a new Durable Object instance over the same storage still has the edit; a new worker instance picks it up
-  const again = makeHub({ ...LOGENV }, kv);
-  await new Promise((r) => setTimeout(r, 5)); // the real runtime holds requests until the constructor has loaded the storage
-  const d = await (await again.LOGS.get().fetch("https://log/cfg")).json();
-  assert.deepEqual(d.values, { BLOCK_COUNTRIES: "LK" });
-  resetConfigCache();
-  assert.equal((await call(plain(), { env: { ...LOGENV, LOGS: again.LOGS }, headers: { Range: "bytes=0-9", "cf-ipcountry": "LK" } })).res.status, 403);
-  resetConfigCache();
-});
-
-test("a settings change is announced on Telegram", async () => {
-  resetAll();
-  tgSent.length = 0;
-  const base = { ...LOGENV, TG_BOT_TOKEN: "tok", TG_CHAT_ID: "42" };
-  const { LOGS } = makeHub(base);
-  await postJson("/config", { set: { CHUNK_MB: "3" }, confirm: true }, { ...base, LOGS });
-  assert.equal(tgSent.length, 1);
-  assert.match(tgSent[0].text, /settings changed/);
-  assert.match(tgSent[0].text, /CHUNK_MB: 1 -> 3/);
-  await postJson("/config", { set: { CHUNK_MB: "3" }, confirm: true }, { ...base, LOGS }); // nothing changed
-  assert.equal(tgSent.length, 1);
-  resetConfigCache();
-});
 
 test("Cloudflare counters: the UTC day rolls over, limits come from the Free plan", () => {
   const u = { day: "", q: 0, dr: 0, dw: 0 };
@@ -870,10 +707,9 @@ test("usage.json counts every request (memory mode and Durable Object mode) and 
   assert.ok(b.meters.rows.used > 0, "Durable Object rows written are counted");
   assert.equal(b.meters.do.limit, 100000);
   assert.equal(b.sub_reserved, 10);
-  // the limit and the alert level are editable settings
+  // the limit and the alert level come from wrangler.toml vars
   const lim = await usage({ ...env, CF_REQ_LIMIT: "5000", CF_WARN_PCT: "60" });
   assert.deepEqual([lim.meters.req.limit, lim.warn_pct], [5000, 60]);
-  resetConfigCache();
 });
 
 test("scheduled check sends a Telegram alert when a Cloudflare Free limit is nearly used up", async () => {
@@ -893,15 +729,14 @@ test("scheduled check sends a Telegram alert when a Cloudflare Free limit is nea
   assert.match(msgs[0].text, /Worker requests/);
   await run();
   assert.equal(tgSent.filter((m) => /Cloudflare Free limit/.test(m.text)).length, 1, "only once per level");
-  resetConfigCache();
 });
 
-test("UI is small: Overview, Link tester, Config, a confirmation dialog, no polling, valid script", async () => {
+test("UI is small: only the Overview page, no polling, valid script", async () => {
   const { UI_HTML } = await import("../src/ui.js");
-  for (const id of ["p-overview", "p-test", "p-config", "mBack"]) assert.ok(UI_HTML.includes(`id="${id}"`), id);
+  for (const id of ["p-overview"]) assert.ok(UI_HTML.includes(`id="${id}"`), id);
   const script = /<script>([\s\S]*)<\/script>/.exec(UI_HTML)[1];
   assert.doesNotMatch(script, /setInterval/, "nothing refreshes by itself (every request counts against the Free plan)");
-  for (const gone of ["p-log", "p-stats", "p-setup", "/logs.json"]) assert.ok(!UI_HTML.includes(gone), gone + " was removed");
+  for (const gone of ["p-log", "p-stats", "p-setup", "p-test", "p-config", "/logs.json", "/config", "/purge"]) assert.ok(!UI_HTML.includes(gone), gone + " was removed");
   const vm = await import("node:vm");
   assert.doesNotThrow(() => new vm.Script(script));
 });

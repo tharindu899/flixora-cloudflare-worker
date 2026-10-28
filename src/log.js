@@ -9,7 +9,7 @@
 
 import { evaluate, sendTelegram } from "./alerts.js";
 import { lockStatus, lockFail, lockClear } from "./auth.js";
-import { FREE, applyChanges, sanitizeOverrides, withOverrides } from "./config.js";
+import { FREE } from "./config.js";
 
 export const MAX_ENTRIES = 60;
 const SESSION_GAP = 10 * 60 * 1000; // a new session starts after 10 min of silence
@@ -337,15 +337,13 @@ const json = (obj, status = 200) =>
 export class LogHub {
   constructor(state, env) {
     this.state = state;
-    this.baseEnv = env || {}; // the worker's own vars (wrangler.toml); edited values are layered on top in this.env
+    this.env = env || {}; // the worker's own vars (wrangler.toml)
     this.entries = [];
     this.days = {};
     this.errs = [];
     this.alert = null;
     this.locks = {};
     this.usage = {};
-    this.cfg = {}; // values edited in the UI (Config page)
-    this.cfgLog = []; // last changes, newest first
     this.cf = { day: "", q: 0, dr: 0, dw: 0 }; // Cloudflare usage of the current UTC day
     this.refreshEnv();
     state.blockConcurrencyWhile(async () => {
@@ -354,15 +352,12 @@ export class LogHub {
       this.errs = (await state.storage.get("errs")) || [];
       this.alert = (await state.storage.get("alert")) || null;
       this.locks = (await state.storage.get("locks")) || {};
-      this.cfg = sanitizeOverrides(await state.storage.get("cfg"));
-      this.cfgLog = (await state.storage.get("cfglog")) || [];
       this.cf = (await state.storage.get("cf")) || this.cf;
       this.refreshEnv();
     });
   }
 
   refreshEnv() {
-    this.env = withOverrides(this.baseEnv, this.cfg);
     const t = this.env.STATS_TZ_MIN;
     this.off = Number.isFinite(Number(t)) && t !== "" && t != null ? Number(t) : 330;
   }
@@ -460,25 +455,6 @@ export class LogHub {
       this.bump({ q: Math.min(100000, Number(body.n) || 0) });
       await this.put("cf", this.cf);
       return json({ ok: true });
-    }
-    if (request.method === "GET" && path === "/cfg") return json({ values: this.cfg, log: this.cfgLog });
-    if (request.method === "POST" && path === "/cfg") {
-      const body = await request.json().catch(() => null);
-      if (!body) return json({ ok: false, error: "bad json" }, 400);
-      const r = applyChanges(this.baseEnv, this.cfg, body);
-      if (!r.ok) return json({ ok: false, errors: r.errors }, 422);
-      if (r.changes.length) {
-        const now = Date.now();
-        this.cfg = r.values;
-        this.cfgLog = [...r.changes.map((c) => ({ t: now, ...c })), ...this.cfgLog].slice(0, 30);
-        await this.put("cfg", this.cfg);
-        await this.put("cfglog", this.cfgLog);
-        this.refreshEnv();
-        const cut = (v) => (String(v).length > 60 ? String(v).slice(0, 57) + "..." : String(v) || "(empty)");
-        const lines = r.changes.slice(0, 12).map((c) => `${c.key}: ${cut(c.from)} -> ${cut(c.to)}`);
-        await sendTelegram(this.env, `⚙️ Flixora proxy settings changed from the UI:\n${lines.join("\n")}`);
-      }
-      return json({ ok: true, values: this.cfg, changes: r.changes, log: this.cfgLog });
     }
     if (request.method === "POST" && path === "/clear") {
       this.entries = [];

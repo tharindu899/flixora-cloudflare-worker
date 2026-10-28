@@ -88,16 +88,14 @@ curl -s -D- -o /dev/null -H "Range: bytes=0-1048575" "$URL" | grep -i "x-flx-cac
 
 ## Dashboard UI
 
-Worker URL එක browser එකෙන් open කරාම (`/` හෝ `/ui`) සරල Dracula dashboard එකක් එනවා. පිටු 3යි:
+Worker URL එක browser එකෙන් open කරාම (`/` හෝ `/ui`, login ඕන) එක පිටුවක් (**Overview**) එනවා: status, backend (VPS) up/down, edge cache, token check,
+Cloudflare Free plan usage (Worker requests, Durable Object requests, DO rows written, reset වෙන වෙලාව, limits table) සහ අද saved / VPS bytes.
 
-- **Overview**: status, backend (VPS) up/down, edge cache, token check, Cloudflare Free plan usage (Worker requests, Durable Object requests, DO rows written, reset වෙන වෙලාව, limits table) සහ අද saved / VPS bytes.
-- **Link tester**: backend link එක paste කරලා HEAD / Range 0-0 test, purge cache.
-- **Config**: settings UI එකෙන් edit (confirm එක්ක).
+**කිසිම දෙයක් auto-refresh වෙන්නේ නෑ**: Free plan එකේ හැම request එකක්ම ගණන් ගන්න නිසා page එක open කරද්දී සහ `refresh` ඔබද්දී විතරයි data ගන්නේ (requests 4ක්).
+Settings වෙනස් කරන්නේ `wrangler.toml` `[vars]` එකෙන් (redeploy). Live log, Stats, Link tester, Config, Setup පිටු අයින් කළා.
+(පහත Live log / Stats / Purge UI ගැන තියෙන කොටස් දැන් අදාළ නෑ; alerts, limits, protection backend එකේ ඒ විදියටම වැඩ කරනවා.)
 
-**කිසිම දෙයක් auto-refresh වෙන්නේ නෑ**: Free plan එකේ හැම request එකක්ම ගණන් ගන්න නිසා, Overview එක open කරද්දී සහ `refresh` ඔබද්දී විතරයි data ගන්නේ (requests 4ක්). Live log, Stats charts සහ Setup පිටු අයින් කළා.
-(පහත Live log / Stats / alerts section වල UI පිටු ගැන තියෙන කොටස් දැන් අදාළ නෑ; alerts, limits, protection backend එකේ ඒ විදියටම වැඩ කරනවා.)
-
-## Stats, alerts, purge (UI)
+## Stats, alerts, protection
 
 - **Overview** cards: Backend (VPS) up/down + ms, **Saved today** (bytes served from the edge instead of the VPS), From VPS today, Requests today.
 - **Stats** page: 7-day totals, 14-day chart (edge vs VPS), daily table, top files. Totals are kept 31 days in the Durable Object
@@ -106,8 +104,6 @@ Worker URL එක browser එකෙන් open කරාම (`/` හෝ `/ui`) �
   A cron trigger (`[triggers]` in `wrangler.toml`, every 5 min) pings every host in `ALLOWED_ORIGINS` and sends a message when the backend is
   down (2 failed checks in a row) and when it is back, when `ALERT_ERRORS` (default 5) streams/downloads fail within 10 min, and, if
   `ALERT_MIN_HIT_PCT` > 0, when today's chunk hit rate is below that. Needs the `LOGS` Durable Object. Setup page -> "send test alert" checks the bot.
-- **Purge cache**: Link tester -> paste a link -> purge cache (tap twice). Deletes that file's cached chunks. Cloudflare's edge cache is per data center,
-  so this clears the location that serves you; other locations just expire (`CACHE_TTL`).
 - **Country block**: `BLOCK_COUNTRIES = "CN,RU"` in `wrangler.toml` (or as a variable). Only proxy traffic is blocked, never the UI login.
 - **Login lock**: 5 wrong passwords from one client within 15 min lock the login for 15 min (HTTP 429, even the right password is refused), and Telegram gets one notice.
 - **Heavy client alert**: a client (IP hash) that pulls more than `ABUSE_GB_PER_HOUR` (default 30) in one hour triggers a Telegram message (once per 6 h). The Stats page lists the heaviest clients of the last hour.
@@ -115,9 +111,9 @@ Worker URL එක browser එකෙන් open කරාම (`/` හෝ `/ui`) �
   and the Stats page counts it under "Limited". Set `0` to turn a limit off. Note: on mobile networks (CGNAT) many people share one IP, so do not set these too low.
 - **Light / dark** toggle in the sidebar (remembered in the browser).
 
-## Cloudflare Free plan limits (UI -> Limits)
+## Cloudflare Free plan limits (UI -> Overview)
 
-Worker එක Cloudflare **Free plan** එකේ limits වලට කිට්ටු වෙනවද කියලා UI එකේ **Limits** පිටුවෙන් බලන්න පුළුවන්:
+Worker එක Cloudflare **Free plan** එකේ limits වලට කිට්ටු වෙනවද කියලා UI එකේ **Overview** පිටුවෙන් බලන්න පුළුවන්:
 
 - **Cards**: Worker requests today (`/ 100,000`), Durable Object requests (`/ 100,000`), DO rows written (estimate, `/ 100,000`), limit reset වෙන්න තියෙන වෙලාව.
   Overview පිටුවෙත් "CF requests today" card එකක් තියෙනවා.
@@ -126,21 +122,7 @@ Worker එක Cloudflare **Free plan** එකේ limits වලට කිට්�
 - Daily limits **00:00 UTC** වලට reset වෙනවා (Sri Lanka 05:30). Stats වල day boundary (`STATS_TZ_MIN`) වෙනස් වුණත් මේක හැමවිටම UTC.
 - Requests ගණන් කරන්නේ Worker එක තනියම (හැම request එකක්ම, UI poll වලත් එක්ක; 5-min cron check එක නැතුව). ඒ නිසා Cloudflare dashboard එකේ අගයට වඩා පොඩ්ඩක් වෙනස් වෙන්න පුළුවන්.
   DO "rows written" එක estimate එකක් (Durable Object storage `put` එකක් = row එකක්). Memory mode (LOGS නැතුව) එකේ ගණන් per-instance, restart වුණාම reset.
-- `CF_REQ_LIMIT` සහ `CF_WARN_PCT` Config පිටුවෙන් වෙනස් කරන්න පුළුවන්. ඒවා meter එකටයි alert එකටයි විතරයි, Cloudflare ගේ real limit එක වෙනස් වෙන්නේ නෑ.
-
-## Config page (settings UI එකෙන්ම edit කරන්න)
-
-UI -> **Config**. `wrangler.toml` එක edit කරලා redeploy නොකර settings වෙනස් කරන්න පුළුවන්:
-
-- Groups: Edge cache, Backend, Protection, Alerts, Cloudflare limits, Stats. හැම field එකකම hint එකක්, `wrangler.toml` / default අගය, "edited" tag එකක් තියෙනවා.
-- **Confirm**: "Review & save" ඔබපුවාම dialog එකක් එනවා (පරණ -> අලුත් අගය, අවදානම් warnings). **Confirm** කරන තුරු කිසිම දෙයක් save වෙන්නේ නෑ. Reset (එක field එකක් හෝ සියල්ල) වලටත් confirm dialog එකක් තියෙනවා.
-  Server එකත් `confirm: true` නැති `POST /config` request reject කරනවා.
-- Validation Worker එකේ: range check, `ALLOWED_ORIGINS` හිස් කරන්න බෑ, country code 2 අකුරු, ආදිය. වැරදි තියෙනවා නම් field එක යටින් error එක පෙන්නලා කිසිම දෙයක් save කරන්නේ නෑ.
-- Save කරපු අගයන් **LOGS Durable Object** එකේ තියෙනවා, `wrangler.toml` අගයට වඩා ප්‍රමුඛයි. ඔයා toml අගයටම ආයෙ දැම්මොත් override එක අයින් වෙනවා.
-  Worker instance එකක් වෙනස් කිරීම තත්පර ~15 ක් ඇතුළත ගන්නවා (save කරපු instance එක ඉක්මනටම).
-- **Durable Object bind කරලා නැත්නම්** (memory mode) Config page එක read-only (storage නැති නිසා).
-- Secrets (`UI_USER`, `UI_PASS`, `TURNSTILE_SECRET`, `TG_*`) UI එකෙන් edit කරන්න බෑ.
-- වෙනස්කම් Telegram එකටත් යනවා (`TG_BOT_TOKEN` තියෙනවා නම්) සහ page එකේ "recent changes" වල අන්තිම 30 පෙන්නනවා.
+- `CF_REQ_LIMIT` සහ `CF_WARN_PCT` `wrangler.toml` එකේ. ඒවා meter එකටයි alert එකටයි විතරයි, Cloudflare ගේ real limit එක වෙනස් වෙන්නේ නෑ.
 
 ## Live log
 

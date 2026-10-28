@@ -44,8 +44,6 @@ MAX_CLIENT_FILES = "6"
 # and the Telegram alert level: alert at this % of any daily Free limit, again at 95% (0 = off).
 CF_REQ_LIMIT = "100000"
 CF_WARN_PCT = "80"
-# Almost every setting in this block can also be edited in the UI (Config page). Edited values are saved in the
-# LOGS Durable Object and win over this file; "reset" in the UI goes back to the values written here.
 # Optional short mode: lets https://worker/dl/<id>/<name> map to this backend URL.
 # ORIGIN_URL = "https://api.example.com"
 

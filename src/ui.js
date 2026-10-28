@@ -171,37 +171,6 @@ table.data-table tr:last-child td{border-bottom:none}
   font-weight:600;padding:8px 16px;border-radius:10px;opacity:0;transition:.25s;pointer-events:none;z-index:99;font-size:13px}
 .toast.show{opacity:1;transform:translate(-50%,0)}
 
-/* config page, usage, confirm dialog */
-.cfg-row{display:grid;grid-template-columns:minmax(0,1.1fr) minmax(0,1.2fr);gap:10px 20px;padding:14px 16px;border-bottom:1px solid var(--border);align-items:start}
-.cfg-row:last-child{border-bottom:none}
-.cfg-row.dirty{background:rgba(255,184,108,.07);box-shadow:inset 2px 0 0 var(--state-running)}
-.cfg-label{font-size:13px;color:var(--text);display:flex;align-items:center;gap:8px;flex-wrap:wrap}
-.cfg-key{font-family:var(--font-mono);font-size:11px;color:var(--text-faint);margin-top:2px}
-.cfg-hint{font-size:11.5px;color:var(--text-faint);line-height:1.55;margin-top:6px}
-.cfg-ctl{display:flex;gap:8px;align-items:center}
-.cfg-ctl .field{width:100%}
-.cfg-base{font-size:11px;color:var(--text-faint);font-family:var(--font-mono);margin-top:6px;overflow-wrap:anywhere}
-.cfg-err{color:var(--state-error);font-size:11.5px;margin-top:6px;font-family:var(--font-mono)}
-.field.bad{border-color:var(--state-error)}
-select.field{cursor:pointer}
-.edited-pill{background:rgba(255,184,108,.15);color:var(--state-running)}
-.savebar{position:sticky;bottom:calc(12px + env(safe-area-inset-bottom,0px));z-index:20;display:flex;align-items:center;gap:10px;flex-wrap:wrap;
-  background:var(--panel-raised);border:1px solid var(--state-running);border-radius:10px;padding:10px 14px;margin-top:14px;box-shadow:0 8px 24px rgba(0,0,0,.35)}
-.savebar .msg{flex:1;min-width:140px;font-size:13px}
-.mig-primary.danger{background:var(--state-error);color:#fff}
-.modal-back{position:fixed;inset:0;background:rgba(0,0,0,.62);z-index:80;display:flex;align-items:center;justify-content:center;padding:16px}
-.modal{background:var(--panel);border:1px solid var(--border);border-radius:12px;max-width:540px;width:100%;max-height:86dvh;display:flex;flex-direction:column;box-shadow:0 20px 50px rgba(0,0,0,.5)}
-.modal-h{padding:16px 18px 4px;font-weight:600;font-size:15px}
-.modal-b{padding:6px 18px 14px;overflow:auto;font-size:13px;color:var(--text-dim);line-height:1.6}
-.modal-b p{margin:6px 0 10px}
-.modal-b ul{margin:0;padding-left:18px}
-.modal-f{display:flex;gap:10px;justify-content:flex-end;padding:12px 18px 16px;border-top:1px solid var(--border)}
-.diff{padding:8px 10px;margin-bottom:8px;border:1px solid var(--border);border-radius:7px;background:var(--panel-raised);overflow-wrap:anywhere}
-.diff b{color:var(--text);font-weight:600}
-.diff .key{font-family:var(--font-mono);font-size:11px;color:var(--text-faint);margin-left:6px}
-.diff .old{font-family:var(--font-mono);color:var(--text-faint);text-decoration:line-through}
-.diff .new{font-family:var(--font-mono);color:var(--state-success)}
-
 @media (max-width:720px){
   .hamburger-btn{display:flex}
   .sidebar{position:fixed;top:0;left:0;height:100dvh;z-index:50;width:250px;transform:translateX(-100%);transition:transform .25s ease}
@@ -225,7 +194,6 @@ select.field{cursor:pointer}
   table.data-table td.nolabel{justify-content:flex-start;text-align:left}
   .pbar{min-width:0;flex:1;text-align:right}
   .term-line span.k{min-width:92px}
-  .cfg-row{grid-template-columns:1fr}
 }
 </style>
 </head>
@@ -275,58 +243,10 @@ select.field{cursor:pointer}
         <div class="hint" id="limHint"></div>
       </div>
 
-      <!-- ================= Link tester ================= -->
-      <div class="page hide" id="p-test">
-        <div class="card pad" style="margin-bottom:14px">
-          <div class="mig-title"><i class="fa-solid fa-link" style="color:var(--accent-pink)"></i>backend link</div>
-          <div class="toolbar" style="margin-bottom:0">
-            <input class="field" id="src" type="url" inputmode="url" autocomplete="off" spellcheck="false"
-              placeholder="https://api.example.com/dl/FILE_ID/name.mkv  or  .../dld/TOKEN/FILE_ID/name.mkv">
-            <button class="act-btn" id="clr" title="Clear"><i class="fa-solid fa-xmark"></i></button>
-          </div>
-          <div class="hint">Paste a backend <span class="mono">/dl</span> or <span class="mono">/dld</span> link. Requests go only to this worker.</div>
-        </div>
-        <div id="out" class="hide">
-          <div class="term-block" style="margin-bottom:14px">
-            <div class="term-block-header"><span>PROXY URL</span>
-              <span><button class="term-block-btn" id="cpy"><i class="fa-regular fa-copy"></i>copy</button></span></div>
-            <div class="term-body mono" id="pxy" style="color:var(--link);word-break:break-all"></div>
-          </div>
-          <div class="toolbar">
-            <button class="mig-primary" id="tHead"><i class="fa-solid fa-satellite-dish"></i>HEAD test</button>
-            <button class="run-btn" id="tRange"><i class="fa-solid fa-arrows-left-right"></i>Range 0-0</button>
-            <button class="act-btn" id="tOpen"><i class="fa-solid fa-arrow-up-right-from-square"></i>open</button>
-            <span class="grow"></span>
-            <button class="act-btn danger" id="tPurge"><i class="fa-solid fa-broom"></i>purge cache</button>
-          </div>
-          <div class="hint">Purge deletes this file's cached chunks (e.g. after re-uploading it). The edge cache is per data center: this clears the location serving you; other locations expire on their own.</div>
-          <div id="res"></div>
-          <div class="hint mono" id="hist"></div>
-        </div>
-      </div>
-
-      <!-- ================= Config ================= -->
-      <div class="page hide" id="p-config">
-        <div class="mig-warn" id="cfgNote">loading&hellip;</div>
-        <div class="toolbar"><span class="grow"></span><button class="act-btn danger hide" id="cfgResetAll"><i class="fa-solid fa-rotate-left"></i>reset all to wrangler.toml</button></div>
-        <div id="cfgForm"></div>
-        <div class="savebar hide" id="cfgBar">
-          <span class="msg" id="cfgMsg"></span>
-          <button class="act-btn" id="cfgDiscard">discard</button>
-          <button class="mig-primary" id="cfgSave"><i class="fa-solid fa-floppy-disk"></i>Review &amp; save</button>
-        </div>
-        <div class="card hide" style="margin-top:14px" id="cfgLogCard"></div>
-      </div>
-
     </div>
   </div>
 </div>
 <div class="toast" id="toast"></div>
-<div class="modal-back hide" id="mBack"><div class="modal" role="dialog" aria-modal="true" aria-labelledby="mTitle">
-  <div class="modal-h" id="mTitle"></div><div class="modal-b" id="mBody"></div>
-  <div class="modal-f"><button class="act-btn" id="mNo">Cancel</button><button class="mig-primary" id="mYes">Confirm</button></div>
-</div></div>
-
 <script>
 (function () {
   var $ = function (id) { return document.getElementById(id); };
@@ -334,9 +254,7 @@ select.field{cursor:pointer}
   var C = { purple: "var(--accent-purple)", pink: "var(--accent-pink)", link: "var(--link)", yellow: "var(--accent-yellow)", green: "var(--state-success)", orange: "var(--state-running)", red: "var(--state-error)" };
 
   var NAV = [
-    { id: "overview", label: "Overview", sub: "Status and Cloudflare Free plan usage", icon: "fa-solid fa-gauge-high", color: "link" },
-    { id: "test", label: "Link tester", sub: "Check a backend link through this worker", icon: "fa-solid fa-flask", color: "pink" },
-    { id: "config", label: "Config", sub: "Edit the worker settings (saved only after you confirm)", icon: "fa-solid fa-sliders", color: "yellow" }
+    { id: "overview", label: "Overview", sub: "Status and Cloudflare Free plan usage", icon: "fa-solid fa-gauge-high", color: "link" }
   ];
 
   function esc(s) {
@@ -423,7 +341,6 @@ select.field{cursor:pointer}
     openSide(false);
     window.scrollTo(0, 0);
     if (id === "overview" && typeof loadOverview === "function") loadOverview();
-    if (id === "config" && typeof loadConfig === "function" && !Object.keys(cfgEdits).length) loadConfig();
   }
   Array.prototype.forEach.call(document.querySelectorAll(".nav-item"), function (b) {
     b.onclick = function () { go(b.getAttribute("data-page")); };
@@ -501,255 +418,8 @@ select.field{cursor:pointer}
       row("Subrequests", F.subrequests + " external / request", "budget " + u.sub_budget) +
       row("DO requests", fmtN(F.doRequestsDay) + " / day", fmtN(dob.used) + " (" + pctOf(dob) + "%)") +
       row("DO rows written", fmtN(F.doRowsWrittenDay) + " / day", fmtN(rows.used) + " (" + pctOf(rows) + "%)") + "</tbody></table>";
-    $("limHint").textContent = "Counted by this worker (every request it receives, including this page), so it can differ a little from the Cloudflare dashboard. Nothing on this page refreshes by itself. The limit and alert level are on the Config page.";
+    $("limHint").textContent = "Counted by this worker (every request it receives, including this page), so it can differ a little from the Cloudflare dashboard. Nothing on this page refreshes by itself. The limit and alert level are CF_REQ_LIMIT and CF_WARN_PCT in wrangler.toml.";
   }
-
-  var purgeAsk = 0;
-  $("tPurge").onclick = function () {
-    var b = $("tPurge");
-    if (!$("src").value.trim()) { toast("Paste a link first"); return; }
-    if (!purgeAsk) {
-      purgeAsk = setTimeout(function () { purgeAsk = 0; b.className = "act-btn danger"; b.innerHTML = '<i class="fa-solid fa-broom"></i>purge cache'; }, 2500);
-      b.className = "act-btn asking"; b.innerHTML = '<i class="fa-solid fa-broom"></i>tap again';
-      return;
-    }
-    clearTimeout(purgeAsk); purgeAsk = 0; b.className = "act-btn danger"; b.disabled = true;
-    var del = 0, name = "";
-    (function step(from) {
-      api("/purge", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ url: $("src").value.trim(), from: from }) }).then(function (d) {
-        if (!d || d.error || d.__status >= 400) { b.disabled = false; b.innerHTML = '<i class="fa-solid fa-broom"></i>purge cache'; toast((d && d.error) || "Purge failed"); return; }
-        del += d.deleted; name = d.name;
-        if (d.next != null) { b.innerHTML = '<i class="fa-solid fa-broom"></i>' + d.next + "/" + d.total; step(d.next); return; }
-        b.disabled = false; b.innerHTML = '<i class="fa-solid fa-broom"></i>purge cache';
-        toast(d.total ? "Purged " + del + " chunk" + (del === 1 ? "" : "s") : "Nothing cached for this file here");
-      });
-    })(0);
-  };
-
-  /* ---------------- link tester ---------------- */
-  var proxyUrl = "", hist = [];
-  function buildProxy(v) {
-    v = v.trim();
-    if (!v) return "";
-    if (v.indexOf(origin + "/") === 0) return v;
-    if (/^https?:\/\//i.test(v)) return origin + "/" + v;
-    return "";
-  }
-  function refresh() {
-    proxyUrl = buildProxy($("src").value);
-    $("out").className = proxyUrl ? "" : "hide";
-    $("pxy").textContent = proxyUrl;
-    if (!proxyUrl) $("res").innerHTML = "";
-  }
-  $("src").addEventListener("input", refresh);
-  $("clr").onclick = function () { $("src").value = ""; refresh(); };
-  $("cpy").onclick = function () { copy(proxyUrl); };
-  $("tOpen").onclick = function () { if (proxyUrl) window.open(proxyUrl, "_blank", "noopener"); };
-  function run(mode) {
-    if (!proxyUrl) return;
-    var btns = [$("tHead"), $("tRange")];
-    btns.forEach(function (b) { b.disabled = true; });
-    $("res").innerHTML = '<div class="hint mono">testing&hellip;</div>';
-    var opt = mode === "head" ? { method: "HEAD" } : { method: "GET", headers: { Range: "bytes=0-0" } };
-    var t0 = performance.now();
-    fetch(proxyUrl, opt).then(function (r) {
-      var ms = Math.round(performance.now() - t0);
-      var H = function (k) { return r.headers.get(k); };
-      if (r.body && mode !== "head") { try { r.body.cancel(); } catch (e) {} }
-      var cl = H("content-length"), cr = H("content-range"), cd = H("content-disposition");
-      var isDld = /\/dld\//.test(proxyUrl);
-      var m = cr ? /\/(\d+)$/.exec(cr) : null;
-      var total = m ? m[1] : (mode === "head" ? cl : null);
-      var checks = [];
-      function ck(ok, text, warn) {
-        var ic = ok ? "fa-circle-check" : warn ? "fa-triangle-exclamation" : "fa-circle-xmark";
-        var col = ok ? C.green : warn ? C.orange : C.red;
-        checks.push('<li><i class="fa-solid ' + ic + '" style="color:' + col + '"></i><span>' + text + "</span></li>");
-      }
-      ck(r.ok, "Worker answered " + r.status + " in " + ms + " ms");
-      ck(H("accept-ranges") === "bytes", "Accept-Ranges: bytes (seek and resume work)");
-      ck(!!cl, "Content-Length present - the download size will show", true);
-      if (mode === "range") ck(r.status === 206 && !!cr, "206 with Content-Range" + (total ? " (file = " + fmtBytes(total) + ")" : ""));
-      if (isDld) ck(/attachment/i.test(cd || ""), "Content-Disposition is attachment (forces download)");
-      if (isDld) ck((H("content-type") || "") === "application/octet-stream", "Content-Type is octet-stream (players will not grab it)", true);
-      var rows = [["status", r.status + " " + (r.statusText || "")], ["x-flx-cache", H("x-flx-cache") || "-"], ["file size", total ? fmtBytes(total) : "?"],
-        ["content-length", cl || "-"], ["content-range", cr || "-"], ["content-type", H("content-type") || "-"],
-        ["disposition", cd || "-"], ["accept-ranges", H("accept-ranges") || "-"]];
-      $("res").innerHTML = '<ul class="checks">' + checks.join("") + "</ul>" +
-        '<div class="term-block"><div class="term-block-header"><span>RESPONSE HEADERS</span><span>' + (mode === "head" ? "HEAD" : "GET bytes=0-0") + " &middot; " + ms + ' ms</span></div><div class="term-body">' +
-        rows.map(function (x) { return '<div class="term-line"><span class="k">' + x[0] + '</span><span class="v">' + esc(x[1]) + "</span></div>"; }).join("") + "</div></div>";
-      hist.unshift((mode === "head" ? "HEAD " : "RANGE ") + r.status + " · " + ms + " ms · " + (H("x-flx-cache") || "-"));
-      hist = hist.slice(0, 5);
-      $("hist").innerHTML = hist.map(esc).join("<br>");
-    }).catch(function (e) {
-      $("res").innerHTML = '<div class="mig-err">Request failed: ' + esc(e && e.message || e) + "</div>";
-    }).then(function () { btns.forEach(function (b) { b.disabled = false; }); });
-  }
-  $("tHead").onclick = function () { run("head"); };
-  $("tRange").onclick = function () { run("range"); };
-
-
-  /* ---------------- confirm dialog ---------------- */
-  var mResolve = null;
-  function closeBox(v) {
-    $("mBack").className = "modal-back hide";
-    var r = mResolve; mResolve = null;
-    if (r) r(v);
-  }
-  function confirmBox(o) {
-    return new Promise(function (resolve) {
-      if (mResolve) closeBox(false);
-      mResolve = resolve;
-      $("mTitle").textContent = o.title;
-      $("mBody").innerHTML = o.html;
-      $("mYes").textContent = o.yes || "Confirm";
-      $("mYes").className = "mig-primary" + (o.danger ? " danger" : "");
-      $("mBack").className = "modal-back";
-      $("mNo").focus();
-    });
-  }
-  $("mYes").onclick = function () { closeBox(true); };
-  $("mNo").onclick = function () { closeBox(false); };
-  $("mBack").addEventListener("click", function (e) { if (e.target === $("mBack")) closeBox(false); });
-  document.addEventListener("keydown", function (e) { if (e.key === "Escape" && mResolve) closeBox(false); });
-
-
-  /* ---------------- config page (edit settings from the UI) ---------------- */
-  var cfgData = null, cfgEdits = {};
-  function cfgField(k) { return (cfgData.fields || []).filter(function (f) { return f.key === k; })[0]; }
-  function shown(v) { return v === "" || v == null ? "(empty)" : String(v); }
-  function ctl(f) {
-    var id = "cf-" + f.key, dis = cfgData.editable ? "" : " disabled", val = cfgEdits.hasOwnProperty(f.key) ? cfgEdits[f.key] : f.value;
-    if (f.type === "bool" || f.type === "enum") {
-      var opts = f.type === "bool" ? [["true", "on"], ["false", "off"]] : f.options.map(function (o) { return [o, o]; });
-      return '<select class="field" id="' + id + '" data-k="' + f.key + '"' + dis + ">" + opts.map(function (o) {
-        return '<option value="' + esc(o[0]) + '"' + (o[0] === val ? " selected" : "") + ">" + esc(o[1]) + "</option>";
-      }).join("") + "</select>";
-    }
-    return '<input class="field" id="' + id + '" data-k="' + f.key + '" value="' + esc(val) + '" autocomplete="off" spellcheck="false"' + (f.type === "int" || f.type === "num" ? ' inputmode="decimal"' : "") + dis + ">";
-  }
-  function renderConfig() {
-    if (!cfgData) return;
-    var ed = cfgData.editable, fields = cfgData.fields || [], any = fields.some(function (f) { return f.edited; });
-    $("cfgNote").textContent = ed
-      ? "Saved settings live in the Durable Object and win over wrangler.toml (its value is shown under each field). Every worker location picks a change up within about " + cfgData.apply_s + " seconds. Secrets (passwords, tokens) cannot be edited here."
-      : "Read only: editing settings needs the LOGS Durable Object binding, which stores the values.";
-    $("cfgNote").className = "mig-warn" + (ed ? "" : " ");
-    $("cfgResetAll").className = "act-btn danger" + (ed && any ? "" : " hide");
-    var groups = [], by = {};
-    fields.forEach(function (f) { if (!by[f.group]) { by[f.group] = []; groups.push(f.group); } by[f.group].push(f); });
-    $("cfgForm").innerHTML = groups.map(function (g) {
-      return '<div class="card" style="margin-bottom:14px"><div class="pad" style="padding-bottom:4px"><div class="mig-title"><i class="fa-solid fa-sliders" style="color:var(--accent-yellow)"></i>' + esc(g) + "</div></div>" +
-        by[g].map(function (f) {
-          var dirty = cfgEdits.hasOwnProperty(f.key);
-          return '<div class="cfg-row' + (dirty ? " dirty" : "") + '" id="row-' + f.key + '"><div><div class="cfg-label">' + esc(f.label) + (f.edited ? ' <span class="tag-pill edited-pill">edited</span>' : "") +
-            '</div><div class="cfg-key">' + f.key + '</div><div class="cfg-hint">' + esc(f.hint) + '</div></div>' +
-            '<div><div class="cfg-ctl">' + ctl(f) + (ed && f.edited ? '<button class="act-btn" data-reset="' + f.key + '" title="Back to the wrangler.toml value"><i class="fa-solid fa-rotate-left"></i></button>' : "") +
-            '</div><div class="cfg-base">wrangler.toml / default: ' + esc(shown(f.base)) + '</div><div class="cfg-err" id="err-' + f.key + '"></div></div></div>';
-        }).join("") + "</div>";
-    }).join("");
-    var log = cfgData.log || [];
-    $("cfgLogCard").className = "card" + (log.length ? "" : " hide");
-    $("cfgLogCard").innerHTML = log.length ? '<div class="pad" style="padding-bottom:0"><div class="mig-title"><i class="fa-solid fa-clock-rotate-left" style="color:var(--link)"></i>recent changes</div></div><table class="data-table"><thead><tr><th>Setting</th><th>Change</th><th>When</th></tr></thead><tbody>' +
-      log.slice(0, 12).map(function (x) {
-        return '<tr><td class="nolabel">' + esc(x.key) + '</td><td data-label="change">' + esc(shown(x.from)) + " &rarr; <span style=\"color:var(--text)\">" + esc(shown(x.to)) + '</span></td><td data-label="when">' + ago(Date.now(), x.t) + "</td></tr>";
-      }).join("") + "</tbody></table>" : "";
-    updateBar();
-  }
-  function updateBar() {
-    var n = Object.keys(cfgEdits).length;
-    $("cfgBar").className = "savebar" + (n && cfgData && cfgData.editable ? "" : " hide");
-    $("cfgMsg").textContent = n + " unsaved change" + (n === 1 ? "" : "s");
-  }
-  function clearErrors() {
-    Array.prototype.forEach.call(document.querySelectorAll(".cfg-err"), function (e) { e.textContent = ""; });
-    Array.prototype.forEach.call(document.querySelectorAll("#cfgForm .field.bad"), function (e) { e.className = "field"; });
-  }
-  function loadConfig() {
-    api("/config.json").then(function (d) {
-      if (!d || !d.fields) { if (d && d.error) { $("cfgNote").textContent = d.error; } return; }
-      cfgData = d; cfgEdits = {}; renderConfig();
-    }).catch(function () {});
-  }
-  function onEdit(e) {
-    var k = e.target.getAttribute && e.target.getAttribute("data-k");
-    if (!k || !cfgData) return;
-    var f = cfgField(k), v = e.target.value;
-    if (String(v).trim() === String(f.value)) delete cfgEdits[k]; else cfgEdits[k] = v;
-    $("row-" + k).className = "cfg-row" + (cfgEdits.hasOwnProperty(k) ? " dirty" : "");
-    e.target.className = "field";
-    $("err-" + k).textContent = "";
-    updateBar();
-  }
-  $("cfgForm").addEventListener("input", onEdit);
-  $("cfgForm").addEventListener("change", onEdit);
-  function saveConfig(body) {
-    body.confirm = true;
-    $("cfgSave").disabled = true;
-    api("/config", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) }).then(function (d) {
-      $("cfgSave").disabled = false;
-      if (!d) return;
-      if (d.__status === 422 && d.errors) {
-        Object.keys(d.errors).forEach(function (k) {
-          var el = $("err-" + k), inp = $("cf-" + k);
-          if (el) el.textContent = d.errors[k];
-          if (inp) inp.className = "field bad";
-        });
-        toast("Some values are not valid");
-        return;
-      }
-      if (d.__status >= 400 || !d.ok) { toast(d.error || "Save failed"); return; }
-      cfgData.fields = d.fields; cfgData.log = d.log; cfgData.apply_s = d.apply_s; cfgEdits = {};
-      renderConfig();
-      toast(d.changes.length ? "Saved " + d.changes.length + " change" + (d.changes.length === 1 ? "" : "s") : "Nothing changed");
-    }).catch(function () { $("cfgSave").disabled = false; toast("Save failed"); });
-  }
-  $("cfgSave").onclick = function () {
-    var keys = Object.keys(cfgEdits);
-    if (!keys.length || !cfgData) return;
-    clearErrors();
-    var warns = [], list = keys.map(function (k) {
-      var f = cfgField(k);
-      if (f.warn) warns.push(f.warn);
-      return '<div class="diff"><b>' + esc(f.label) + '</b><span class="key">' + k + '</span><br><span class="old">' + esc(shown(f.value)) + '</span> &rarr; <span class="new">' + esc(shown(String(cfgEdits[k]).trim())) + "</span></div>";
-    }).join("");
-    confirmBox({
-      title: "Save " + keys.length + " change" + (keys.length === 1 ? "" : "s") + "?",
-      html: "<p>These settings are saved and used by the worker within about " + cfgData.apply_s + " seconds:</p>" + list +
-        (warns.length ? '<div class="mig-warn" style="margin:12px 0 0"><ul>' + warns.map(function (w) { return "<li>" + esc(w) + "</li>"; }).join("") + "</ul></div>" : ""),
-      yes: "Save changes"
-    }).then(function (ok) {
-      if (!ok) return;
-      var set = {};
-      keys.forEach(function (k) { set[k] = String(cfgEdits[k]).trim(); });
-      saveConfig({ set: set });
-    });
-  };
-  $("cfgDiscard").onclick = function () { cfgEdits = {}; clearErrors(); renderConfig(); };
-  $("cfgForm").addEventListener("click", function (e) {
-    var b = e.target.closest ? e.target.closest("[data-reset]") : null;
-    if (!b || !cfgData) return;
-    var k = b.getAttribute("data-reset"), f = cfgField(k);
-    confirmBox({
-      title: "Reset " + f.label + "?",
-      html: '<p>Back to the wrangler.toml value.</p><div class="diff"><b>' + esc(f.label) + '</b><span class="key">' + k + '</span><br><span class="old">' + esc(shown(f.value)) + '</span> &rarr; <span class="new">' + esc(shown(f.base)) + "</span></div>",
-      yes: "Reset"
-    }).then(function (ok) { if (ok) saveConfig({ reset: [k] }); });
-  });
-  $("cfgResetAll").onclick = function () {
-    if (!cfgData) return;
-    var edited = cfgData.fields.filter(function (f) { return f.edited; });
-    if (!edited.length) return;
-    confirmBox({
-      title: "Reset all " + edited.length + " edited setting" + (edited.length === 1 ? "" : "s") + "?",
-      html: "<p>Everything goes back to the values in wrangler.toml:</p>" + edited.map(function (f) {
-        return '<div class="diff"><b>' + esc(f.label) + '</b><span class="key">' + f.key + '</span><br><span class="old">' + esc(shown(f.value)) + '</span> &rarr; <span class="new">' + esc(shown(f.base)) + "</span></div>";
-      }).join(""),
-      yes: "Reset all", danger: true
-    }).then(function (ok) { if (ok) saveConfig({ all: true }); });
-  };
-  loadConfig();
-
 
   go(location.hash.slice(1) || "overview", false);
 })();
