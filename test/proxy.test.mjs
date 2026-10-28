@@ -60,7 +60,7 @@ globalThis.caches = {
   },
 };
 
-const { default: worker } = await import("../src/index.js");
+const { default: worker, resetConfigCache } = await import("../src/index.js");
 
 const ENV = { ALLOWED_ORIGINS: HOST, CHUNK_MB: "1", MAX_CHUNKS: "3", ENABLE_CACHE: "true", TURNSTILE_SECRET: SECRET };
 
@@ -77,6 +77,7 @@ const plain = (p = `/dl/${FILE_ID}/movie.mkv`) => `/https://${HOST}${p}`;
 const resetAll = () => {
   store.clear();
   originCalls = [];
+  resetConfigCache();
 };
 
 function makeToken(fileId, expires = Math.floor(Date.now() / 1000) + 600) {
@@ -455,7 +456,7 @@ test("alert rules: down after 2 failed checks, recovery, error spike, low hit ra
   assert.match(r.messages[0], /20%/);
   r = evaluate(null, { ping: good, now: t, today: { h: 10, m: 40 }, cfg });
   assert.equal(r.messages.length, 0); // too little data
-  assert.deepEqual(alertConfig({}), { errCount: 5, minHit: 0 });
+  assert.deepEqual(alertConfig({}), { errCount: 5, minHit: 0, cfWarn: 80, cfLimit: 100000 });
 });
 
 test("scheduled check: Durable Object remembers state, Telegram gets the DOWN and the recovery message", async () => {
@@ -657,4 +658,248 @@ test("per-client limits: extra files / connections get 429 + Retry-After and are
 test("status.json reports the limits", async () => {
   const s = jsonOf(await call("/status.json", { env: { ...LOGENV, MAX_CLIENT_FILES: "3", ABUSE_GB_PER_HOUR: "12" }, headers: { cookie: AUTH } }));
   assert.deepEqual([s.max_files, s.max_reqs, s.abuse_gb], [3, 24, 12]);
+});
+
+// ---------------------------------------------------------------- UI-editable settings + Cloudflare Free limits
+const { validateValue, FIELD_MAP, applyChanges, describeFields, FREE } = await import("../src/config.js");
+const { bumpCf, cfView } = await import("../src/log.js");
+
+const makeHub = (baseEnv, kv = new Map()) => {
+  const hub = new LogHub(
+    { storage: { get: async (k) => kv.get(k), put: async (k, v) => kv.set(k, structuredClone(v)) }, blockConcurrencyWhile: (fn) => fn() },
+    baseEnv
+  );
+  const LOGS = { idFromName: (n) => n, get: () => ({ fetch: (u, init) => hub.fetch(new Request(u, init)) }) };
+  return { kv, hub, LOGS };
+};
+
+test("settings validation: every type normalizes or explains what is wrong", () => {
+  const v = (key, raw) => validateValue(FIELD_MAP[key], raw);
+  assert.deepEqual(v("CHUNK_MB", " 8 "), { ok: true, value: "8" });
+  assert.equal(v("CHUNK_MB", "0").ok, false);
+  assert.equal(v("CHUNK_MB", "33").ok, false);
+  assert.equal(v("CHUNK_MB", "4.5").ok, false);
+  assert.equal(v("MAX_CLIENT_REQS", "0").ok, true); // 0 = no limit
+  assert.equal(v("STATS_TZ_MIN", "-300").ok, true);
+  assert.deepEqual(v("ABUSE_GB_PER_HOUR", "0.5"), { ok: true, value: "0.5" });
+  assert.equal(v("PREFETCH_NEXT", "ON").value, "true");
+  assert.equal(v("PREFETCH_NEXT", "off").value, "false");
+  assert.equal(v("PREFETCH_NEXT", "maybe").ok, false);
+  assert.equal(v("ENABLE_CACHE", "AUTO").value, "auto");
+  assert.equal(v("ENABLE_CACHE", "sometimes").ok, false);
+  assert.equal(v("BLOCK_COUNTRIES", "cn, ru ,CN").value, "CN,RU");
+  assert.equal(v("BLOCK_COUNTRIES", "").value, "");
+  assert.equal(v("BLOCK_COUNTRIES", "usa").ok, false);
+  assert.equal(v("ALLOWED_ORIGINS", "https://API.Example.com/").value, "api.example.com");
+  assert.equal(v("ALLOWED_ORIGINS", "a.example.com, b.example.com").value, "a.example.com,b.example.com");
+  assert.equal(v("ALLOWED_ORIGINS", "").ok, false); // would lock everybody out
+  assert.equal(v("ALLOWED_ORIGINS", "api.example.com/dl").ok, false);
+  assert.equal(v("ORIGIN_URL", "").value, "");
+  assert.equal(v("ORIGIN_URL", "https://api.example.com/").value, "https://api.example.com");
+  assert.equal(v("ORIGIN_URL", "http://api.example.com").ok, false);
+  assert.equal(v("CF_REQ_LIMIT", "100000").ok, true);
+  assert.equal(v("CF_WARN_PCT", "101").ok, false);
+  assert.equal(Object.keys(FIELD_MAP).some((k) => /SECRET|PASS|TOKEN|USER/.test(k)), false, "secrets can never be edited from the UI");
+});
+
+test("applyChanges: a value equal to wrangler.toml is no override, unknown keys are refused, reset and reset-all work", () => {
+  const env = { CHUNK_MB: "4", ALLOWED_ORIGINS: "api.example.com" };
+  let r = applyChanges(env, {}, { set: { CHUNK_MB: "8", MAX_CHUNKS: "12" } });
+  assert.deepEqual(r.values, { CHUNK_MB: "8" }); // MAX_CHUNKS 12 is the default -> not stored
+  assert.deepEqual(r.changes, [{ key: "CHUNK_MB", from: "4", to: "8" }]);
+  r = applyChanges(env, r.values, { set: { CHUNK_MB: "4" } });
+  assert.deepEqual(r.values, {});
+  assert.deepEqual(r.changes, [{ key: "CHUNK_MB", from: "8", to: "4" }]);
+  assert.equal(applyChanges(env, {}, { set: { UI_PASS: "x" } }).ok, false);
+  assert.equal(applyChanges(env, {}, { set: { CHUNK_MB: "99" } }).errors.CHUNK_MB.length > 0, true);
+  const cur = { CHUNK_MB: "8", BLOCK_COUNTRIES: "CN" };
+  assert.deepEqual(applyChanges(env, cur, { reset: ["CHUNK_MB"] }).values, { BLOCK_COUNTRIES: "CN" });
+  r = applyChanges(env, cur, { all: true });
+  assert.deepEqual(r.values, {});
+  assert.equal(r.changes.length, 2);
+  const f = describeFields(env, { CHUNK_MB: "8" }).find((x) => x.key === "CHUNK_MB");
+  assert.deepEqual([f.base, f.value, f.edited], ["4", "8", true]);
+});
+
+test("config API: login + Durable Object + confirmation needed, bad values refused, change applies at once, reset works", async () => {
+  resetAll();
+  assert.equal((await call("/config.json", { env: LOGENV })).res.status, 401);
+  assert.equal((await postJson("/config", { set: { CHUNK_MB: "2" }, confirm: true }, { ...LOGENV })).res.status, 409); // memory mode: nowhere to store it
+  assert.equal(jsonOf(await call("/config.json", { env: LOGENV, headers: { cookie: AUTH } })).editable, false);
+
+  const { LOGS } = makeHub({ ...LOGENV });
+  const env = { ...LOGENV, LOGS };
+  const fields = async () => jsonOf(await call("/config.json", { env, headers: { cookie: AUTH } }));
+  const chunk = async () => (await fields()).fields.find((f) => f.key === "CHUNK_MB");
+  assert.equal((await fields()).editable, true);
+  assert.deepEqual([(await chunk()).base, (await chunk()).edited], ["1", false]);
+
+  // no confirmation -> nothing happens
+  assert.equal((await postJson("/config", { set: { CHUNK_MB: "2" } }, env)).res.status, 400);
+  assert.equal((await postJson("/config", { set: { CHUNK_MB: "2" }, confirm: "yes" }, env)).res.status, 400);
+  assert.equal((await chunk()).edited, false);
+  // not JSON / not logged in
+  assert.equal((await call("/config", { env, method: "POST", payload: "{}" })).res.status, 401);
+  assert.equal((await call("/config", { env, method: "POST", headers: { cookie: AUTH }, payload: "{}" })).res.status, 400);
+  // bad values are refused with a reason per setting, and nothing is saved
+  const bad = await postJson("/config", { set: { CHUNK_MB: "99", BLOCK_COUNTRIES: "xx1", ALLOWED_ORIGINS: "ok.example.com" }, confirm: true }, env);
+  assert.equal(bad.res.status, 422);
+  const errs = jsonOf(bad).errors;
+  assert.ok(errs.CHUNK_MB && errs.BLOCK_COUNTRIES && !errs.ALLOWED_ORIGINS);
+  assert.equal((await chunk()).edited, false);
+
+  // a good change is stored and used by the very next request
+  const ok = await postJson("/config", { set: { CHUNK_MB: "2", MAX_CLIENT_FILES: "9" }, confirm: true }, env);
+  assert.equal(ok.res.status, 200);
+  assert.deepEqual(jsonOf(ok).changes.map((c) => c.key), ["CHUNK_MB", "MAX_CLIENT_FILES"]);
+  assert.equal(jsonOf(await call("/health", { env })).chunk_mb, 2);
+  const c2 = await chunk();
+  assert.deepEqual([c2.base, c2.value, c2.edited], ["1", "2", true]);
+  assert.equal(jsonOf(await call("/status.json", { env, headers: { cookie: AUTH } })).max_files, 9);
+
+  // 2 MB chunks really are used for the stream (cache keys follow the chunk size)
+  resetAll();
+  await call(plain(), { env, headers: { Range: "bytes=0-9" } });
+  assert.ok([...store.keys()].some((k) => k.includes("/2/")), "chunk size 2 in the cache key");
+
+  // typing the wrangler.toml value again removes the override
+  await postJson("/config", { set: { CHUNK_MB: "1" }, confirm: true }, env);
+  assert.equal((await chunk()).edited, false);
+  assert.equal(jsonOf(await call("/health", { env })).chunk_mb, 1);
+  // reset everything
+  await postJson("/config", { set: { MAX_CHUNKS: "7", BLOCK_COUNTRIES: "CN" }, confirm: true }, env);
+  assert.equal(jsonOf(await call("/health", { env })).max_chunks, 7);
+  const all = await postJson("/config", { all: true, confirm: true }, env);
+  assert.equal(jsonOf(all).fields.some((f) => f.edited), false);
+  assert.equal(jsonOf(await call("/health", { env })).max_chunks, 3);
+  assert.ok((await fields()).log.length >= 4, "changes are listed");
+  resetConfigCache();
+});
+
+test("edited settings change how traffic is handled (allowed hosts, blocked countries) and survive a Durable Object restart", async () => {
+  resetAll();
+  const { kv, LOGS } = makeHub({ ...LOGENV });
+  const env = { ...LOGENV, LOGS };
+  assert.equal((await call(plain(), { env, headers: { Range: "bytes=0-9" } })).res.status, 206);
+  await postJson("/config", { set: { ALLOWED_ORIGINS: "other.example.com" }, confirm: true }, env);
+  assert.equal((await call(plain(), { env, headers: { Range: "bytes=0-9" } })).res.status, 403);
+  assert.equal((await call("/ui", { env, headers: { cookie: AUTH } })).res.status, 200, "the UI stays reachable");
+  await postJson("/config", { reset: ["ALLOWED_ORIGINS"], set: { BLOCK_COUNTRIES: "lk" }, confirm: true }, env);
+  assert.equal((await call(plain(), { env, headers: { Range: "bytes=0-9", "cf-ipcountry": "LK" } })).res.status, 403);
+  assert.equal((await call(plain(), { env, headers: { Range: "bytes=0-9", "cf-ipcountry": "DE" } })).res.status, 206);
+  // a new Durable Object instance over the same storage still has the edit; a new worker instance picks it up
+  const again = makeHub({ ...LOGENV }, kv);
+  await new Promise((r) => setTimeout(r, 5)); // the real runtime holds requests until the constructor has loaded the storage
+  const d = await (await again.LOGS.get().fetch("https://log/cfg")).json();
+  assert.deepEqual(d.values, { BLOCK_COUNTRIES: "LK" });
+  resetConfigCache();
+  assert.equal((await call(plain(), { env: { ...LOGENV, LOGS: again.LOGS }, headers: { Range: "bytes=0-9", "cf-ipcountry": "LK" } })).res.status, 403);
+  resetConfigCache();
+});
+
+test("a settings change is announced on Telegram", async () => {
+  resetAll();
+  tgSent.length = 0;
+  const base = { ...LOGENV, TG_BOT_TOKEN: "tok", TG_CHAT_ID: "42" };
+  const { LOGS } = makeHub(base);
+  await postJson("/config", { set: { CHUNK_MB: "3" }, confirm: true }, { ...base, LOGS });
+  assert.equal(tgSent.length, 1);
+  assert.match(tgSent[0].text, /settings changed/);
+  assert.match(tgSent[0].text, /CHUNK_MB: 1 -> 3/);
+  await postJson("/config", { set: { CHUNK_MB: "3" }, confirm: true }, { ...base, LOGS }); // nothing changed
+  assert.equal(tgSent.length, 1);
+  resetConfigCache();
+});
+
+test("Cloudflare counters: the UTC day rolls over, limits come from the Free plan", () => {
+  const u = { day: "", q: 0, dr: 0, dw: 0 };
+  const t = Date.UTC(2026, 9, 28, 23, 59, 0);
+  bumpCf(u, t, { q: 5, dr: 2, dw: 1 });
+  bumpCf(u, t + 1000, { q: 1 });
+  assert.deepEqual(cfView(u, t), { day: "2026-10-28", q: 6, dr: 2, dw: 1 });
+  assert.deepEqual(cfView(u, t + 120000), { day: "2026-10-29", q: 0, dr: 0, dw: 0 }); // after 00:00 UTC
+  bumpCf(u, t + 120000, { q: 1 });
+  assert.deepEqual(u, { day: "2026-10-29", q: 1, dr: 0, dw: 0 });
+  assert.deepEqual([FREE.workerRequestsDay, FREE.doRequestsDay, FREE.doRowsWrittenDay, FREE.cpuMs, FREE.subrequests], [100000, 100000, 100000, 10, 50]);
+});
+
+test("Cloudflare limit alerts: warn %, 95% and 100% once each per day, again after the reset", () => {
+  const cfg = { errCount: 5, minHit: 0, cfWarn: 80 };
+  const t = 1_000_000_000_000;
+  const at = (day, used, prev) => evaluate(prev, { ping: null, now: t, cfg, cf: { day, meters: [{ id: "req", label: "Worker requests", used, limit: 100000 }] } });
+  let r = at("2026-10-28", 79000, null);
+  assert.equal(r.messages.length, 0);
+  r = at("2026-10-28", 80500, r.state);
+  assert.match(r.messages[0], /warning/);
+  assert.match(r.messages[0], /80,500 \/ 100,000 today \(80%\)/);
+  r = at("2026-10-28", 90000, r.state);
+  assert.equal(r.messages.length, 0);
+  r = at("2026-10-28", 96000, r.state);
+  assert.match(r.messages[0], /almost reached/);
+  r = at("2026-10-28", 100000, r.state);
+  assert.match(r.messages[0], /reached/);
+  r = at("2026-10-28", 120000, r.state);
+  assert.equal(r.messages.length, 0);
+  r = at("2026-10-29", 85000, r.state);
+  assert.match(r.messages[0], /warning/); // new day, counters were reset
+  assert.equal(evaluate(null, { now: t, cfg: { ...cfg, cfWarn: 0 }, cf: { day: "d", meters: [{ id: "req", label: "x", used: 99999, limit: 100000 }] } }).messages.length, 0); // 0 = off
+});
+
+test("usage.json counts every request (memory mode and Durable Object mode) and needs a login", async () => {
+  resetAll();
+  assert.equal((await call("/usage.json", { env: LOGENV })).res.status, 401);
+  const usage = async (env) => jsonOf(await call("/usage.json", { env, headers: { cookie: AUTH } }));
+  // memory mode
+  let a = await usage(LOGENV);
+  for (let i = 0; i < 4; i++) await call("/health", { env: LOGENV });
+  let b = await usage(LOGENV);
+  assert.equal(b.mode, "memory");
+  assert.ok(b.meters.req.used >= a.meters.req.used + 4);
+  assert.equal(b.meters.req.limit, 100000);
+  assert.equal(b.reset_at - Date.parse(b.day + "T00:00:00Z"), 86400000);
+  // Durable Object mode: counts go to the Durable Object (batched), the page adds what is not sent yet
+  const { LOGS } = makeHub({ ...LOGENV });
+  const env = { ...LOGENV, LOGS };
+  a = await usage(env);
+  for (let i = 0; i < 30; i++) await call("/health", { env });
+  await call(plain(), { env, headers: { Range: "bytes=0-1048575" } });
+  b = await usage(env);
+  assert.equal(b.mode, "durable");
+  assert.ok(b.meters.req.used >= a.meters.req.used + 31);
+  assert.ok(b.meters.do.used > a.meters.do.used, "Durable Object requests are counted");
+  assert.ok(b.meters.rows.used > 0, "Durable Object rows written are counted");
+  assert.equal(b.meters.do.limit, 100000);
+  assert.equal(b.sub_reserved, 10);
+  // the limit and the alert level are editable settings
+  const lim = await usage({ ...env, CF_REQ_LIMIT: "5000", CF_WARN_PCT: "60" });
+  assert.deepEqual([lim.meters.req.limit, lim.warn_pct], [5000, 60]);
+  resetConfigCache();
+});
+
+test("scheduled check sends a Telegram alert when a Cloudflare Free limit is nearly used up", async () => {
+  resetAll();
+  tgSent.length = 0;
+  const base = { ...LOGENV, TG_BOT_TOKEN: "tok", TG_CHAT_ID: "42", CF_REQ_LIMIT: "10", CF_WARN_PCT: "50" };
+  const { LOGS } = makeHub(base);
+  const env = { ...base, LOGS };
+  for (let i = 0; i < 30; i++) await call("/health", { env });
+  const run = () => {
+    const waits = [];
+    return worker.scheduled({}, env, { waitUntil: (p) => waits.push(p) }).then(() => Promise.all(waits));
+  };
+  await run();
+  const msgs = tgSent.filter((m) => /Cloudflare Free limit/.test(m.text));
+  assert.equal(msgs.length, 1);
+  assert.match(msgs[0].text, /Worker requests/);
+  await run();
+  assert.equal(tgSent.filter((m) => /Cloudflare Free limit/.test(m.text)).length, 1, "only once per level");
+  resetConfigCache();
+});
+
+test("UI has the Limits and Config pages with a confirmation dialog, and its script is valid", async () => {
+  const { UI_HTML } = await import("../src/ui.js");
+  for (const id of ["p-limits", "p-config", "mBack"]) assert.ok(UI_HTML.includes(`id="${id}"`), id);
+  const script = /<script>([\s\S]*)<\/script>/.exec(UI_HTML)[1];
+  const vm = await import("node:vm");
+  assert.doesNotThrow(() => new vm.Script(script));
 });

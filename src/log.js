@@ -9,6 +9,7 @@
 
 import { evaluate, sendTelegram } from "./alerts.js";
 import { lockStatus, lockFail, lockClear } from "./auth.js";
+import { FREE, applyChanges, sanitizeOverrides, withOverrides } from "./config.js";
 
 export const MAX_ENTRIES = 60;
 const SESSION_GAP = 10 * 60 * 1000; // a new session starts after 10 min of silence
@@ -294,6 +295,41 @@ export function statsView(days, now, offsetMin = 330) {
   };
 }
 
+// ---------------------------------------------------------------- Cloudflare usage counters (UTC day, like Cloudflare's limits)
+
+export const utcDay = (now) => new Date(now).toISOString().slice(0, 10);
+export const memCf = { day: "", q: 0, dr: 0, dw: 0 };
+
+/** Adds to today's counters (q = Worker requests, dr = Durable Object requests, dw = DO rows written). Mutates `u`. */
+export function bumpCf(u, now, add) {
+  const day = utcDay(now);
+  if (u.day !== day) {
+    u.day = day;
+    u.q = u.dr = u.dw = 0;
+  }
+  u.q += Math.max(0, Math.floor(Number(add?.q) || 0));
+  u.dr += Math.max(0, Math.floor(Number(add?.dr) || 0));
+  u.dw += Math.max(0, Math.floor(Number(add?.dw) || 0));
+}
+
+/** Today's numbers (zeros when the stored day is already over). */
+export function cfView(u, now) {
+  const day = utcDay(now);
+  return u && u.day === day ? { day, q: u.q, dr: u.dr, dw: u.dw } : { day, q: 0, dr: 0, dw: 0 };
+}
+
+/** Meters in the shape evaluate() wants. */
+export function cfMeters(view, cfLimit) {
+  return {
+    day: view.day,
+    meters: [
+      { id: "req", label: "Worker requests", used: view.q, limit: cfLimit || FREE.workerRequestsDay },
+      { id: "do", label: "Durable Object requests", used: view.dr, limit: FREE.doRequestsDay },
+      { id: "rows", label: "Durable Object rows written (estimate)", used: view.dw, limit: FREE.doRowsWrittenDay },
+    ],
+  };
+}
+
 const json = (obj, status = 200) =>
   new Response(JSON.stringify(obj), { status, headers: { "Content-Type": "application/json", "Cache-Control": "no-store" } });
 
@@ -301,24 +337,48 @@ const json = (obj, status = 200) =>
 export class LogHub {
   constructor(state, env) {
     this.state = state;
-    this.off = Number.isFinite(Number(env?.STATS_TZ_MIN)) && env?.STATS_TZ_MIN !== "" && env?.STATS_TZ_MIN != null ? Number(env.STATS_TZ_MIN) : 330;
+    this.baseEnv = env || {}; // the worker's own vars (wrangler.toml); edited values are layered on top in this.env
     this.entries = [];
     this.days = {};
     this.errs = [];
     this.alert = null;
     this.locks = {};
     this.usage = {};
-    this.env = env || {};
+    this.cfg = {}; // values edited in the UI (Config page)
+    this.cfgLog = []; // last changes, newest first
+    this.cf = { day: "", q: 0, dr: 0, dw: 0 }; // Cloudflare usage of the current UTC day
+    this.refreshEnv();
     state.blockConcurrencyWhile(async () => {
       this.entries = (await state.storage.get("entries")) || [];
       this.days = (await state.storage.get("days")) || {};
       this.errs = (await state.storage.get("errs")) || [];
       this.alert = (await state.storage.get("alert")) || null;
       this.locks = (await state.storage.get("locks")) || {};
+      this.cfg = sanitizeOverrides(await state.storage.get("cfg"));
+      this.cfgLog = (await state.storage.get("cfglog")) || [];
+      this.cf = (await state.storage.get("cf")) || this.cf;
+      this.refreshEnv();
     });
   }
 
+  refreshEnv() {
+    this.env = withOverrides(this.baseEnv, this.cfg);
+    const t = this.env.STATS_TZ_MIN;
+    this.off = Number.isFinite(Number(t)) && t !== "" && t != null ? Number(t) : 330;
+  }
+
+  bump(add) {
+    bumpCf(this.cf, Date.now(), add);
+  }
+
+  /** Every storage write is one SQLite row written on the Free plan (limit 100,000 / day) - count it. */
+  put(key, value) {
+    this.bump({ dw: 1 });
+    return this.state.storage.put(key, value);
+  }
+
   async fetch(request) {
+    this.bump({ dr: 1 });
     const path = new URL(request.url).pathname;
     if (request.method === "POST" && path === "/event") {
       let ev;
@@ -329,15 +389,15 @@ export class LogHub {
       }
       const now = Date.now();
       applyEvent(this.entries, ev, now);
-      await this.state.storage.put("entries", this.entries);
+      await this.put("entries", this.entries);
       if (ev && ev.type === "end") {
         addDaily(this.days, ev, now, this.off);
-        await this.state.storage.put("days", this.days);
+        await this.put("days", this.days);
         const warn = noteUsage(this.usage, ev, now, abuseLimitBytes(this.env));
         if (warn) await sendTelegram(this.env, warn);
         if (ev.state === "error") {
           noteError(this.errs, ev, now);
-          await this.state.storage.put("errs", this.errs);
+          await this.put("errs", this.errs);
         }
       }
       return json({ ok: true });
@@ -353,7 +413,7 @@ export class LogHub {
       const r = gateDecision(this.entries, body, now);
       if (!r.ok) {
         addDenied(this.days, now, this.off);
-        await this.state.storage.put("days", this.days);
+        await this.put("days", this.days);
       }
       return json(r);
     }
@@ -366,12 +426,12 @@ export class LogHub {
       if (body.op === "clear") {
         if (this.locks[key]) {
           lockClear(this.locks, key);
-          await this.state.storage.put("locks", this.locks);
+          await this.put("locks", this.locks);
         }
         return json({ ok: true });
       }
       const r = lockFail(this.locks, key, now);
-      await this.state.storage.put("locks", this.locks);
+      await this.put("locks", this.locks);
       return json(r);
     }
     if (request.method === "POST" && path === "/alerts") {
@@ -382,14 +442,47 @@ export class LogHub {
         return json({ error: "bad json" }, 400);
       }
       const now = Date.now();
-      const r = evaluate(this.alert, { ping: body.ping, now, errTimes: this.errs, today: this.days[dayKey(now, this.off)] || null, cfg: body.cfg });
+      const r = evaluate(this.alert, {
+        ping: body.ping,
+        now,
+        errTimes: this.errs,
+        today: this.days[dayKey(now, this.off)] || null,
+        cfg: body.cfg,
+        cf: cfMeters(cfView(this.cf, now), body.cfg?.cfLimit),
+      });
       this.alert = r.state;
-      await this.state.storage.put("alert", this.alert);
+      await this.put("alert", this.alert);
       return json({ messages: r.messages, state: r.state });
+    }
+    if (path === "/usage") return json(cfView(this.cf, Date.now()));
+    if (request.method === "POST" && path === "/count") {
+      const body = await request.json().catch(() => ({}));
+      this.bump({ q: Math.min(100000, Number(body.n) || 0) });
+      await this.put("cf", this.cf);
+      return json({ ok: true });
+    }
+    if (request.method === "GET" && path === "/cfg") return json({ values: this.cfg, log: this.cfgLog });
+    if (request.method === "POST" && path === "/cfg") {
+      const body = await request.json().catch(() => null);
+      if (!body) return json({ ok: false, error: "bad json" }, 400);
+      const r = applyChanges(this.baseEnv, this.cfg, body);
+      if (!r.ok) return json({ ok: false, errors: r.errors }, 422);
+      if (r.changes.length) {
+        const now = Date.now();
+        this.cfg = r.values;
+        this.cfgLog = [...r.changes.map((c) => ({ t: now, ...c })), ...this.cfgLog].slice(0, 30);
+        await this.put("cfg", this.cfg);
+        await this.put("cfglog", this.cfgLog);
+        this.refreshEnv();
+        const cut = (v) => (String(v).length > 60 ? String(v).slice(0, 57) + "..." : String(v) || "(empty)");
+        const lines = r.changes.slice(0, 12).map((c) => `${c.key}: ${cut(c.from)} -> ${cut(c.to)}`);
+        await sendTelegram(this.env, `⚙️ Flixora proxy settings changed from the UI:\n${lines.join("\n")}`);
+      }
+      return json({ ok: true, values: this.cfg, changes: r.changes, log: this.cfgLog });
     }
     if (request.method === "POST" && path === "/clear") {
       this.entries = [];
-      await this.state.storage.put("entries", this.entries);
+      await this.put("entries", this.entries);
       return json({ ok: true });
     }
     return json({ error: "not found" }, 404);

@@ -9,7 +9,12 @@ const MIN = 60 * 1000;
 
 export function alertConfig(env) {
   const n = (v, d) => (Number.isFinite(Number(v)) && v !== "" && v != null ? Number(v) : d);
-  return { errCount: Math.max(1, n(env.ALERT_ERRORS, 5)), minHit: Math.min(100, Math.max(0, n(env.ALERT_MIN_HIT_PCT, 0))) };
+  return {
+    errCount: Math.max(1, n(env.ALERT_ERRORS, 5)),
+    minHit: Math.min(100, Math.max(0, n(env.ALERT_MIN_HIT_PCT, 0))),
+    cfWarn: Math.min(100, Math.max(0, n(env.CF_WARN_PCT, 80))), // % of a Cloudflare Free daily limit (0 = off)
+    cfLimit: Math.max(1, n(env.CF_REQ_LIMIT, 100000)), // Worker requests per day
+  };
 }
 
 export const telegramReady = (env) => Boolean(env.TG_BOT_TOKEN && env.TG_CHAT_ID);
@@ -63,7 +68,7 @@ export async function pingBackends(env) {
   return { up: !bad, ms: worst.ms, host: worst.host, code: worst.code, error: bad ? bad.error : "", t: Date.now(), hosts: results.length };
 }
 
-export const freshAlertState = () => ({ down: false, fails: 0, downSince: 0, lastErr: 0, lastHit: 0 });
+export const freshAlertState = () => ({ down: false, fails: 0, downSince: 0, lastErr: 0, lastHit: 0, cfDay: "", cfLv: {} });
 
 const fmtB = (n) => {
   const u = ["B", "KB", "MB", "GB", "TB"];
@@ -76,7 +81,7 @@ const fmtB = (n) => {
 };
 
 /** Pure: (state, inputs) -> { state, messages } */
-export function evaluate(prev, { ping, now, errTimes = [], today = null, cfg }) {
+export function evaluate(prev, { ping, now, errTimes = [], today = null, cfg, cf = null }) {
   const s = { ...freshAlertState(), ...prev };
   const messages = [];
 
@@ -107,6 +112,25 @@ export function evaluate(prev, { ping, now, errTimes = [], today = null, cfg }) 
     if (chunks >= 300 && pct < cfg.minHit && now - s.lastHit > 6 * 60 * MIN) {
       s.lastHit = now;
       messages.push(`📉 Edge cache hit rate today is ${pct}% (limit ${cfg.minHit}%). ${fmtB(today.mb || 0)} came from the VPS.`);
+    }
+  }
+
+  // Cloudflare Free plan daily limits (they reset at 00:00 UTC): one alert per level (warn %, 95%, 100%) per meter per day
+  if (cf && Array.isArray(cf.meters) && cfg.cfWarn > 0) {
+    if (s.cfDay !== cf.day) {
+      s.cfDay = cf.day;
+      s.cfLv = {};
+    }
+    const num = (n) => Math.round(n).toLocaleString("en-US");
+    for (const m of cf.meters) {
+      if (!(m.limit > 0)) continue;
+      const pct = (m.used * 100) / m.limit;
+      const lv = pct >= 100 ? 3 : pct >= 95 ? 2 : pct >= cfg.cfWarn ? 1 : 0;
+      if (lv > (s.cfLv[m.id] || 0)) {
+        s.cfLv[m.id] = lv;
+        const head = lv >= 3 ? "🛑 Cloudflare Free limit reached" : lv === 2 ? "🚨 Cloudflare Free limit almost reached" : "⚠️ Cloudflare Free limit warning";
+        messages.push(`${head}: ${m.label} ${num(m.used)} / ${num(m.limit)} today (${Math.floor(pct)}%). The count resets at 00:00 UTC.`);
+      }
     }
   }
   return { state: s, messages };

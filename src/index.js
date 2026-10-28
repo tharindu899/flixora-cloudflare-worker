@@ -16,7 +16,8 @@
 import { UI_HTML } from "./ui.js";
 import { loginHtml } from "./login.js";
 import { authConfigured, checkLogin, isAuthed, sessionCookie, clearCookie, lockStatus, lockFail, lockClear, memLocks } from "./auth.js";
-import { applyEvent, snapshot, uaLabel, memEntries, memDays, memErrs, memUsage, addDaily, noteError, noteUsage, statsView, abuseLimitBytes, heavyClients, gateDecision, addDenied } from "./log.js";
+import { applyEvent, snapshot, uaLabel, memEntries, memDays, memErrs, memUsage, addDaily, noteError, noteUsage, statsView, abuseLimitBytes, heavyClients, gateDecision, addDenied, bumpCf, cfView, memCf } from "./log.js";
+import { FREE, describeFields, sanitizeOverrides, withOverrides } from "./config.js";
 import { alertConfig, pingBackends, sendTelegram, telegramReady } from "./alerts.js";
 
 export { LogHub } from "./log.js";
@@ -686,6 +687,66 @@ async function serve(request, ctx, c, parsed, reqUrl, env, client) {
   return new Response(readable, { status: partial ? 206 : 200, headers });
 }
 
+// ---------------------------------------------------------------- settings edited in the UI (stored in the LogHub Durable Object)
+
+const OV_TTL = 15000; // every worker instance re-reads the edited values at most this often (ms)
+let ovCache = { t: 0, v: {} };
+
+/** Tests only: forget cached settings and the request counter. */
+export function resetConfigCache() {
+  ovCache = { t: 0, v: {} };
+  meter.n = 0;
+  meter.last = 0;
+}
+
+async function loadOverrides(env, force = false) {
+  if (!env.LOGS) return {}; // memory mode: nothing persistent to edit
+  const now = Date.now();
+  if (!force && now - ovCache.t < OV_TTL) return ovCache.v;
+  try {
+    const stub = env.LOGS.get(env.LOGS.idFromName("main"));
+    const resp = await Promise.race([stub.fetch("https://log/cfg"), sleep(1500).then(() => null)]);
+    if (resp) ovCache = { t: now, v: sanitizeOverrides((await resp.json()).values) };
+    else ovCache.t = now - OV_TTL + 3000; // slow Durable Object: keep what we have, ask again in 3 s
+  } catch (_) {
+    ovCache.t = now - OV_TTL + 3000;
+  }
+  return ovCache.v;
+}
+
+/** The worker env with the values edited in the UI on top (secrets and bindings read straight through). */
+const effectiveEnv = async (env, force = false) => withOverrides(env, await loadOverrides(env, force));
+
+// ---------------------------------------------------------------- Cloudflare request counter (Free plan: 100,000 / day)
+
+const meter = { n: 0, last: 0 };
+const FLUSH_N = 25; // send the count to the Durable Object every 25 requests ...
+const FLUSH_MS = 20000; // ... or after 20 s, whichever comes first (one tiny call instead of one per request)
+
+function noteRequest(env, ctx) {
+  const now = Date.now();
+  if (!env.LOGS) {
+    bumpCf(memCf, now, { q: 1 });
+    return;
+  }
+  meter.n++;
+  if (meter.n < FLUSH_N && now - meter.last < FLUSH_MS) return;
+  const n = meter.n;
+  meter.n = 0;
+  meter.last = now;
+  try {
+    const stub = env.LOGS.get(env.LOGS.idFromName("main"));
+    ctx.waitUntil(
+      stub
+        .fetch("https://log/count", { method: "POST", body: JSON.stringify({ n }) })
+        .then((r) => cancelBody(r))
+        .catch(() => {})
+    );
+  } catch (_) {
+    /* counting must never affect a request */
+  }
+}
+
 // ---------------------------------------------------------------- per-client limits
 
 const intVar = (v, d) => (v === undefined || v === null || v === "" || !Number.isFinite(Number(v)) ? d : Math.max(0, Math.floor(Number(v))));
@@ -808,9 +869,8 @@ async function runChecks(env) {
 
 // ---------------------------------------------------------------- entry
 
-async function handle(request, env, ctx) {
+async function handle(request, rawEnv, ctx) {
   const url = new URL(request.url);
-  const c = readConfig(env, url.hostname);
 
   if (request.method === "OPTIONS") {
     const h = withCors(new Headers());
@@ -819,7 +879,10 @@ async function handle(request, env, ctx) {
     h.set("Access-Control-Max-Age", "86400");
     return new Response(null, { status: 204, headers: h });
   }
-  const isPostRoute = request.method === "POST" && ["/logs/clear", "/login", "/logout", "/purge", "/alerts/test"].includes(url.pathname);
+  // wrangler.toml values + whatever was edited on the Config page
+  const env = await effectiveEnv(rawEnv);
+  const c = readConfig(env, url.hostname);
+  const isPostRoute = request.method === "POST" && ["/logs/clear", "/login", "/logout", "/purge", "/alerts/test", "/config"].includes(url.pathname);
   if (request.method !== "GET" && request.method !== "HEAD" && !isPostRoute) return jsonError(405, "Method not allowed");
   const secure = url.protocol === "https:";
 
@@ -920,7 +983,7 @@ async function handle(request, env, ctx) {
     }
   }
 
-  if (["/status.json", "/stats.json", "/purge", "/alerts/test"].includes(url.pathname)) {
+  if (["/status.json", "/stats.json", "/usage.json", "/config.json", "/config", "/purge", "/alerts/test"].includes(url.pathname)) {
     if (!authConfigured(env)) return jsonError(403, "UI_USER / UI_PASS are not set on the worker");
     if (!(await isAuthed(request, env))) return jsonError(401, "Sign in required");
     const plain = (obj, status = 200) =>
@@ -956,11 +1019,88 @@ async function handle(request, env, ctx) {
         return jsonError(502, "Stats store unavailable");
       }
     }
+    if (url.pathname === "/usage.json") {
+      const now = Date.now();
+      let u;
+      let mode = "memory";
+      if (stub) {
+        try {
+          u = await (await stub.fetch("https://log/usage")).json();
+          u.q += meter.n; // requests of this instance not sent to the Durable Object yet
+          mode = "durable";
+        } catch (_) {
+          return jsonError(502, "Usage store unavailable");
+        }
+      } else {
+        u = cfView(memCf, now);
+      }
+      const cfg = alertConfig(env);
+      const dayStart = Date.parse(u.day + "T00:00:00Z");
+      const elapsed = now - dayStart;
+      return plain({
+        mode,
+        now,
+        day: u.day,
+        reset_at: dayStart + 86400000,
+        warn_pct: cfg.cfWarn,
+        meters: {
+          req: { used: u.q, limit: cfg.cfLimit },
+          do: { used: u.dr, limit: FREE.doRequestsDay },
+          rows: { used: u.dw, limit: FREE.doRowsWrittenDay },
+        },
+        projected: elapsed > 3600000 ? Math.round((u.q * 86400000) / elapsed) : null,
+        free: FREE,
+        chunk_mb: c.chunkMB,
+        sub_budget: SUBREQUEST_BUDGET - (env.LOGS ? LOG_RESERVE : 0),
+        sub_reserved: env.LOGS ? LOG_RESERVE : 0,
+      });
+    }
+    if (url.pathname === "/config.json") {
+      let values = {};
+      let log = [];
+      if (stub) {
+        try {
+          const d = await (await stub.fetch("https://log/cfg")).json();
+          values = sanitizeOverrides(d.values);
+          log = d.log || [];
+        } catch (_) {
+          return jsonError(502, "Settings store unavailable");
+        }
+      }
+      return plain({ editable: Boolean(stub), apply_s: OV_TTL / 1000, fields: describeFields(rawEnv, values), log });
+    }
     if (request.method !== "POST") return jsonError(405, "Use POST");
     if (url.pathname === "/alerts/test") {
       if (!telegramReady(env)) return jsonError(400, "TG_BOT_TOKEN / TG_CHAT_ID are not set on the worker");
       const ok = await sendTelegram(env, "✅ Flixora proxy: test alert. Telegram alerts are working.");
       return ok ? plain({ ok: true }) : jsonError(502, "Telegram rejected the message (check token and chat id)");
+    }
+    if (url.pathname === "/config") {
+      if (!stub) return jsonError(409, "Editing settings needs the LOGS Durable Object (it stores the values)");
+      if (!(request.headers.get("content-type") || "").includes("application/json")) return jsonError(400, "Send JSON");
+      let body;
+      try {
+        const text = await request.text();
+        if (text.length > 8192) throw new Error("too big");
+        body = JSON.parse(text);
+      } catch (_) {
+        return jsonError(400, "Bad request");
+      }
+      if (!body || body.confirm !== true) return jsonError(400, "Confirmation required");
+      let resp;
+      try {
+        resp = await stub.fetch("https://log/cfg", {
+          method: "POST",
+          body: JSON.stringify({ set: body.set, reset: body.reset, all: body.all === true }),
+        });
+      } catch (_) {
+        return jsonError(502, "Settings store unavailable");
+      }
+      const d = await resp.json().catch(() => ({}));
+      if (resp.status === 422) return plain({ error: "Some values are not valid", errors: d.errors || {} }, 422);
+      if (!resp.ok) return jsonError(502, "Settings store unavailable");
+      ovCache = { t: Date.now(), v: sanitizeOverrides(d.values) }; // this instance applies it right away
+      return plain({ ok: true, changes: d.changes || [], fields: describeFields(rawEnv, d.values), log: d.log || [], apply_s: OV_TTL / 1000 });
     }
     return purgeCache(request, env, c, url, plain);
   }
@@ -1004,9 +1144,10 @@ async function handle(request, env, ctx) {
 
 export default {
   async scheduled(event, env, ctx) {
-    ctx.waitUntil(runChecks(env));
+    ctx.waitUntil(effectiveEnv(env, true).then((eff) => runChecks(eff)));
   },
   async fetch(request, env, ctx) {
+    noteRequest(env, ctx);
     try {
       return await handle(request, env, ctx);
     } catch (e) {

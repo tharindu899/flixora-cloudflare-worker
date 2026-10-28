@@ -36,9 +36,9 @@ html[data-theme=light] .act-btn.on{background:rgba(11,117,151,.08)}
 *{box-sizing:border-box}
 html,body{height:100%;margin:0}
 body{background:var(--bg);color:var(--text);font-family:var(--font-sans);-webkit-font-smoothing:antialiased;font-size:14px}
-button,input{font-family:inherit}
+button,input,select{font-family:inherit}
 ::selection{background:var(--link);color:#0F1720}
-a:focus-visible,button:focus-visible,input:focus-visible{outline:2px solid var(--link);outline-offset:2px}
+a:focus-visible,button:focus-visible,input:focus-visible,select:focus-visible{outline:2px solid var(--link);outline-offset:2px}
 .dot{width:7px;height:7px;border-radius:50%;display:inline-block;flex-shrink:0}
 .dot.running{animation:pulse 1.1s ease-in-out infinite;box-shadow:0 0 6px currentColor}
 @keyframes pulse{0%,100%{opacity:1}50%{opacity:.35}}
@@ -171,6 +171,37 @@ table.data-table tr:last-child td{border-bottom:none}
   font-weight:600;padding:8px 16px;border-radius:10px;opacity:0;transition:.25s;pointer-events:none;z-index:99;font-size:13px}
 .toast.show{opacity:1;transform:translate(-50%,0)}
 
+/* config page, usage, confirm dialog */
+.cfg-row{display:grid;grid-template-columns:minmax(0,1.1fr) minmax(0,1.2fr);gap:10px 20px;padding:14px 16px;border-bottom:1px solid var(--border);align-items:start}
+.cfg-row:last-child{border-bottom:none}
+.cfg-row.dirty{background:rgba(255,184,108,.07);box-shadow:inset 2px 0 0 var(--state-running)}
+.cfg-label{font-size:13px;color:var(--text);display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.cfg-key{font-family:var(--font-mono);font-size:11px;color:var(--text-faint);margin-top:2px}
+.cfg-hint{font-size:11.5px;color:var(--text-faint);line-height:1.55;margin-top:6px}
+.cfg-ctl{display:flex;gap:8px;align-items:center}
+.cfg-ctl .field{width:100%}
+.cfg-base{font-size:11px;color:var(--text-faint);font-family:var(--font-mono);margin-top:6px;overflow-wrap:anywhere}
+.cfg-err{color:var(--state-error);font-size:11.5px;margin-top:6px;font-family:var(--font-mono)}
+.field.bad{border-color:var(--state-error)}
+select.field{cursor:pointer}
+.edited-pill{background:rgba(255,184,108,.15);color:var(--state-running)}
+.savebar{position:sticky;bottom:calc(12px + env(safe-area-inset-bottom,0px));z-index:20;display:flex;align-items:center;gap:10px;flex-wrap:wrap;
+  background:var(--panel-raised);border:1px solid var(--state-running);border-radius:10px;padding:10px 14px;margin-top:14px;box-shadow:0 8px 24px rgba(0,0,0,.35)}
+.savebar .msg{flex:1;min-width:140px;font-size:13px}
+.mig-primary.danger{background:var(--state-error);color:#fff}
+.modal-back{position:fixed;inset:0;background:rgba(0,0,0,.62);z-index:80;display:flex;align-items:center;justify-content:center;padding:16px}
+.modal{background:var(--panel);border:1px solid var(--border);border-radius:12px;max-width:540px;width:100%;max-height:86dvh;display:flex;flex-direction:column;box-shadow:0 20px 50px rgba(0,0,0,.5)}
+.modal-h{padding:16px 18px 4px;font-weight:600;font-size:15px}
+.modal-b{padding:6px 18px 14px;overflow:auto;font-size:13px;color:var(--text-dim);line-height:1.6}
+.modal-b p{margin:6px 0 10px}
+.modal-b ul{margin:0;padding-left:18px}
+.modal-f{display:flex;gap:10px;justify-content:flex-end;padding:12px 18px 16px;border-top:1px solid var(--border)}
+.diff{padding:8px 10px;margin-bottom:8px;border:1px solid var(--border);border-radius:7px;background:var(--panel-raised);overflow-wrap:anywhere}
+.diff b{color:var(--text);font-weight:600}
+.diff .key{font-family:var(--font-mono);font-size:11px;color:var(--text-faint);margin-left:6px}
+.diff .old{font-family:var(--font-mono);color:var(--text-faint);text-decoration:line-through}
+.diff .new{font-family:var(--font-mono);color:var(--state-success)}
+
 @media (max-width:720px){
   .hamburger-btn{display:flex}
   .sidebar{position:fixed;top:0;left:0;height:100dvh;z-index:50;width:250px;transform:translateX(-100%);transition:transform .25s ease}
@@ -194,6 +225,7 @@ table.data-table tr:last-child td{border-bottom:none}
   table.data-table td.nolabel{justify-content:flex-start;text-align:left}
   .pbar{min-width:0;flex:1;text-align:right}
   .term-line span.k{min-width:92px}
+  .cfg-row{grid-template-columns:1fr}
 }
 </style>
 </head>
@@ -309,6 +341,27 @@ table.data-table tr:last-child td{border-bottom:none}
         </div>
       </div>
 
+      <!-- ================= Limits ================= -->
+      <div class="page hide" id="p-limits">
+        <div class="stat-grid" id="limCards"></div>
+        <div class="mig-warn hide" id="limNote"></div>
+        <div class="card" style="margin-bottom:14px" id="limTable"><div class="empty">loading&hellip;</div></div>
+        <div class="hint" id="limHint"></div>
+      </div>
+
+      <!-- ================= Config ================= -->
+      <div class="page hide" id="p-config">
+        <div class="mig-warn" id="cfgNote">loading&hellip;</div>
+        <div class="toolbar"><span class="grow"></span><button class="act-btn danger hide" id="cfgResetAll"><i class="fa-solid fa-rotate-left"></i>reset all to wrangler.toml</button></div>
+        <div id="cfgForm"></div>
+        <div class="savebar hide" id="cfgBar">
+          <span class="msg" id="cfgMsg"></span>
+          <button class="act-btn" id="cfgDiscard">discard</button>
+          <button class="mig-primary" id="cfgSave"><i class="fa-solid fa-floppy-disk"></i>Review &amp; save</button>
+        </div>
+        <div class="card hide" style="margin-top:14px" id="cfgLogCard"></div>
+      </div>
+
       <!-- ================= Setup ================= -->
       <div class="page hide" id="p-setup">
         <div class="chart-card" style="margin-bottom:14px">
@@ -349,6 +402,10 @@ table.data-table tr:last-child td{border-bottom:none}
   </div>
 </div>
 <div class="toast" id="toast"></div>
+<div class="modal-back hide" id="mBack"><div class="modal" role="dialog" aria-modal="true" aria-labelledby="mTitle">
+  <div class="modal-h" id="mTitle"></div><div class="modal-b" id="mBody"></div>
+  <div class="modal-f"><button class="act-btn" id="mNo">Cancel</button><button class="mig-primary" id="mYes">Confirm</button></div>
+</div></div>
 
 <script>
 (function () {
@@ -360,7 +417,9 @@ table.data-table tr:last-child td{border-bottom:none}
     { id: "overview", label: "Overview", sub: "Live snapshot of the proxy", icon: "fa-solid fa-gauge-high", color: "link" },
     { id: "log", label: "Live log", sub: "Who plays and downloads what, and how fast", icon: "fa-solid fa-list-ul", color: "green" },
     { id: "stats", label: "Stats", sub: "Daily traffic and what the edge cache saved", icon: "fa-solid fa-chart-column", color: "purple" },
+    { id: "limits", label: "Limits", sub: "Cloudflare Free plan usage and limits", icon: "fa-solid fa-gauge", color: "orange" },
     { id: "test", label: "Link tester", sub: "Check a backend link through this worker", icon: "fa-solid fa-flask", color: "pink" },
+    { id: "config", label: "Config", sub: "Edit the worker settings (saved only after you confirm)", icon: "fa-solid fa-sliders", color: "yellow" },
     { id: "setup", label: "Setup", sub: "Endpoints, cache headers and configuration", icon: "fa-solid fa-gear", color: "orange" }
   ];
 
@@ -447,6 +506,8 @@ table.data-table tr:last-child td{border-bottom:none}
     if (push !== false) { try { history.replaceState(null, "", "#" + id); } catch (e) {} }
     openSide(false);
     window.scrollTo(0, 0);
+    if (id === "limits" && typeof loadUsage === "function") loadUsage();
+    if (id === "config" && typeof loadConfig === "function" && !Object.keys(cfgEdits).length) loadConfig();
   }
   Array.prototype.forEach.call(document.querySelectorAll(".nav-item"), function (b) {
     b.onclick = function () { go(b.getAttribute("data-page")); };
@@ -633,6 +694,10 @@ table.data-table tr:last-child td{border-bottom:none}
       h += statCard("fa-solid fa-server", "orange", "From VPS today", fmtBytes(t.mb), null, "fetched from your backend");
       h += statCard("fa-solid fa-film", t.e ? "red" : "link", "Requests today", String(t.r), null, t.e ? t.e + " failed" : "none failed");
     }
+    if (lastUsage) {
+      var rq = lastUsage.meters.req, rp = Math.min(100, Math.round(rq.used * 100 / rq.limit));
+      h += statCard("fa-solid fa-cloud", rp >= 95 ? "red" : rp >= 80 ? "orange" : "link", "CF requests today", fmtN(rq.used) + " / " + fmtN(rq.limit), rp);
+    }
     $("cards2").innerHTML = h;
   }
   var lastStatus = null, lastStats = null;
@@ -794,6 +859,210 @@ table.data-table tr:last-child td{border-bottom:none}
   }
   $("tHead").onclick = function () { run("head"); };
   $("tRange").onclick = function () { run("range"); };
+
+  /* ---------------- confirm dialog ---------------- */
+  var mResolve = null;
+  function closeBox(v) {
+    $("mBack").className = "modal-back hide";
+    var r = mResolve; mResolve = null;
+    if (r) r(v);
+  }
+  function confirmBox(o) {
+    return new Promise(function (resolve) {
+      if (mResolve) closeBox(false);
+      mResolve = resolve;
+      $("mTitle").textContent = o.title;
+      $("mBody").innerHTML = o.html;
+      $("mYes").textContent = o.yes || "Confirm";
+      $("mYes").className = "mig-primary" + (o.danger ? " danger" : "");
+      $("mBack").className = "modal-back";
+      $("mNo").focus();
+    });
+  }
+  $("mYes").onclick = function () { closeBox(true); };
+  $("mNo").onclick = function () { closeBox(false); };
+  $("mBack").addEventListener("click", function (e) { if (e.target === $("mBack")) closeBox(false); });
+  document.addEventListener("keydown", function (e) { if (e.key === "Escape" && mResolve) closeBox(false); });
+
+  /* ---------------- Cloudflare limits page ---------------- */
+  var lastUsage = null;
+  function fmtN(n) { return Math.round(Number(n) || 0).toLocaleString("en-US"); }
+  function pctOf(m) { return m.limit > 0 ? Math.min(100, Math.round(m.used * 100 / m.limit)) : 0; }
+  function renderLimits(u) {
+    var req = u.meters.req, dob = u.meters["do"], rows = u.meters.rows, F = u.free;
+    var reset = new Date(u.reset_at).toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit" });
+    $("limCards").innerHTML =
+      statCard("fa-solid fa-cloud", "link", "Worker requests today", fmtN(req.used) + " / " + fmtN(req.limit), pctOf(req)) +
+      statCard("fa-solid fa-cubes-stacked", "purple", "Durable Object requests", fmtN(dob.used) + " / " + fmtN(dob.limit), pctOf(dob)) +
+      statCard("fa-solid fa-pen-to-square", "pink", "DO rows written (est.)", fmtN(rows.used) + " / " + fmtN(rows.limit), pctOf(rows)) +
+      statCard("fa-solid fa-hourglass-half", "orange", "Resets in", dur(Math.max(0, u.reset_at - u.now)), null, "00:00 UTC = " + reset + " your time");
+    var worst = Math.max(pctOf(req), pctOf(dob), pctOf(rows)), notes = [];
+    if (u.warn_pct > 0 && worst >= u.warn_pct) notes.push("A Cloudflare Free limit is at " + worst + "% for today. When a limit is reached Cloudflare stops answering until 00:00 UTC.");
+    if (u.projected && u.projected > req.limit) notes.push("At this pace about " + fmtN(u.projected) + " requests will be used by the end of the day.");
+    $("limNote").textContent = notes.join(" ");
+    $("limNote").className = "mig-warn" + (notes.length ? "" : " hide");
+    var row = function (k, free, mine) { return "<tr><td data-label=\"limit\" style=\"color:var(--text)\">" + k + "</td><td data-label=\"Free plan\">" + free + "</td><td data-label=\"this worker\">" + mine + "</td></tr>"; };
+    var pc = function (m) { return fmtN(m.used) + " (" + pctOf(m) + "%)"; };
+    $("limTable").innerHTML = "<table class=\"data-table\"><thead><tr><th>Limit</th><th>Free plan</th><th>This worker</th></tr></thead><tbody>" +
+      row("Worker requests", fmtN(F.workerRequestsDay) + " / day", pc(req) + (u.projected ? " &middot; ~" + fmtN(u.projected) + " by day end" : "")) +
+      row("Burst rate", fmtN(F.burstPerMinute) + " requests / minute", "over it Cloudflare answers error 1015") +
+      row("CPU time", F.cpuMs + " ms / request", "bodies are piped natively, no per-byte JS") +
+      row("Subrequests", F.subrequests + " external / request", "budget " + u.sub_budget + (u.sub_reserved ? " (" + u.sub_reserved + " kept for the log)" : "")) +
+      row("Worker memory", F.memoryMB + " MB", "chunk size " + u.chunk_mb + " MB") +
+      row("Worker size", F.scriptMB + " MB compressed", "small") +
+      row("Durable Object requests", fmtN(F.doRequestsDay) + " / day", pc(dob)) +
+      row("DO rows written", fmtN(F.doRowsWrittenDay) + " / day", pc(rows) + " &middot; estimate") +
+      row("DO rows read", fmtN(F.doRowsReadDay) + " / day", "not counted (state is served from memory)") +
+      row("DO storage", F.doStorageGB + " GB", "a few KB") + "</tbody></table>";
+    $("limHint").textContent = "Requests are counted by this worker itself (every request it receives, including this page; the 5-minute check is not included), so the numbers can differ a little from the Cloudflare dashboard. " +
+      "All daily limits reset at 00:00 UTC. The limit and the Telegram alert level are editable on the Config page." +
+      (u.mode === "memory" ? " Memory mode (no Durable Object): counts are per worker instance and reset when it restarts." : "");
+  }
+  function loadUsage() {
+    api("/usage.json").then(function (u) {
+      if (!u || !u.meters) return;
+      lastUsage = u;
+      renderLimits(u);
+      renderTodayCards(lastStatus, lastStats);
+    }).catch(function () {});
+  }
+  loadUsage(); setInterval(function () { if (!document.hidden) loadUsage(); }, 30000);
+
+  /* ---------------- config page (edit settings from the UI) ---------------- */
+  var cfgData = null, cfgEdits = {};
+  function cfgField(k) { return (cfgData.fields || []).filter(function (f) { return f.key === k; })[0]; }
+  function shown(v) { return v === "" || v == null ? "(empty)" : String(v); }
+  function ctl(f) {
+    var id = "cf-" + f.key, dis = cfgData.editable ? "" : " disabled", val = cfgEdits.hasOwnProperty(f.key) ? cfgEdits[f.key] : f.value;
+    if (f.type === "bool" || f.type === "enum") {
+      var opts = f.type === "bool" ? [["true", "on"], ["false", "off"]] : f.options.map(function (o) { return [o, o]; });
+      return '<select class="field" id="' + id + '" data-k="' + f.key + '"' + dis + ">" + opts.map(function (o) {
+        return '<option value="' + esc(o[0]) + '"' + (o[0] === val ? " selected" : "") + ">" + esc(o[1]) + "</option>";
+      }).join("") + "</select>";
+    }
+    return '<input class="field" id="' + id + '" data-k="' + f.key + '" value="' + esc(val) + '" autocomplete="off" spellcheck="false"' + (f.type === "int" || f.type === "num" ? ' inputmode="decimal"' : "") + dis + ">";
+  }
+  function renderConfig() {
+    if (!cfgData) return;
+    var ed = cfgData.editable, fields = cfgData.fields || [], any = fields.some(function (f) { return f.edited; });
+    $("cfgNote").textContent = ed
+      ? "Saved settings live in the Durable Object and win over wrangler.toml (its value is shown under each field). Every worker location picks a change up within about " + cfgData.apply_s + " seconds. Secrets (passwords, tokens) cannot be edited here."
+      : "Read only: editing settings needs the LOGS Durable Object binding, which stores the values.";
+    $("cfgNote").className = "mig-warn" + (ed ? "" : " ");
+    $("cfgResetAll").className = "act-btn danger" + (ed && any ? "" : " hide");
+    var groups = [], by = {};
+    fields.forEach(function (f) { if (!by[f.group]) { by[f.group] = []; groups.push(f.group); } by[f.group].push(f); });
+    $("cfgForm").innerHTML = groups.map(function (g) {
+      return '<div class="card" style="margin-bottom:14px"><div class="pad" style="padding-bottom:4px"><div class="mig-title"><i class="fa-solid fa-sliders" style="color:var(--accent-yellow)"></i>' + esc(g) + "</div></div>" +
+        by[g].map(function (f) {
+          var dirty = cfgEdits.hasOwnProperty(f.key);
+          return '<div class="cfg-row' + (dirty ? " dirty" : "") + '" id="row-' + f.key + '"><div><div class="cfg-label">' + esc(f.label) + (f.edited ? ' <span class="tag-pill edited-pill">edited</span>' : "") +
+            '</div><div class="cfg-key">' + f.key + '</div><div class="cfg-hint">' + esc(f.hint) + '</div></div>' +
+            '<div><div class="cfg-ctl">' + ctl(f) + (ed && f.edited ? '<button class="act-btn" data-reset="' + f.key + '" title="Back to the wrangler.toml value"><i class="fa-solid fa-rotate-left"></i></button>' : "") +
+            '</div><div class="cfg-base">wrangler.toml / default: ' + esc(shown(f.base)) + '</div><div class="cfg-err" id="err-' + f.key + '"></div></div></div>';
+        }).join("") + "</div>";
+    }).join("");
+    var log = cfgData.log || [];
+    $("cfgLogCard").className = "card" + (log.length ? "" : " hide");
+    $("cfgLogCard").innerHTML = log.length ? '<div class="pad" style="padding-bottom:0"><div class="mig-title"><i class="fa-solid fa-clock-rotate-left" style="color:var(--link)"></i>recent changes</div></div><table class="data-table"><thead><tr><th>Setting</th><th>Change</th><th>When</th></tr></thead><tbody>' +
+      log.slice(0, 12).map(function (x) {
+        return '<tr><td class="nolabel">' + esc(x.key) + '</td><td data-label="change">' + esc(shown(x.from)) + " &rarr; <span style=\"color:var(--text)\">" + esc(shown(x.to)) + '</span></td><td data-label="when">' + ago(Date.now(), x.t) + "</td></tr>";
+      }).join("") + "</tbody></table>" : "";
+    updateBar();
+  }
+  function updateBar() {
+    var n = Object.keys(cfgEdits).length;
+    $("cfgBar").className = "savebar" + (n && cfgData && cfgData.editable ? "" : " hide");
+    $("cfgMsg").textContent = n + " unsaved change" + (n === 1 ? "" : "s");
+  }
+  function clearErrors() {
+    Array.prototype.forEach.call(document.querySelectorAll(".cfg-err"), function (e) { e.textContent = ""; });
+    Array.prototype.forEach.call(document.querySelectorAll("#cfgForm .field.bad"), function (e) { e.className = "field"; });
+  }
+  function loadConfig() {
+    api("/config.json").then(function (d) {
+      if (!d || !d.fields) { if (d && d.error) { $("cfgNote").textContent = d.error; } return; }
+      cfgData = d; cfgEdits = {}; renderConfig();
+    }).catch(function () {});
+  }
+  function onEdit(e) {
+    var k = e.target.getAttribute && e.target.getAttribute("data-k");
+    if (!k || !cfgData) return;
+    var f = cfgField(k), v = e.target.value;
+    if (String(v).trim() === String(f.value)) delete cfgEdits[k]; else cfgEdits[k] = v;
+    $("row-" + k).className = "cfg-row" + (cfgEdits.hasOwnProperty(k) ? " dirty" : "");
+    e.target.className = "field";
+    $("err-" + k).textContent = "";
+    updateBar();
+  }
+  $("cfgForm").addEventListener("input", onEdit);
+  $("cfgForm").addEventListener("change", onEdit);
+  function saveConfig(body) {
+    body.confirm = true;
+    $("cfgSave").disabled = true;
+    api("/config", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) }).then(function (d) {
+      $("cfgSave").disabled = false;
+      if (!d) return;
+      if (d.__status === 422 && d.errors) {
+        Object.keys(d.errors).forEach(function (k) {
+          var el = $("err-" + k), inp = $("cf-" + k);
+          if (el) el.textContent = d.errors[k];
+          if (inp) inp.className = "field bad";
+        });
+        toast("Some values are not valid");
+        return;
+      }
+      if (d.__status >= 400 || !d.ok) { toast(d.error || "Save failed"); return; }
+      cfgData.fields = d.fields; cfgData.log = d.log; cfgData.apply_s = d.apply_s; cfgEdits = {};
+      renderConfig(); loadHealth(); loadExtra(); loadUsage();
+      toast(d.changes.length ? "Saved " + d.changes.length + " change" + (d.changes.length === 1 ? "" : "s") : "Nothing changed");
+    }).catch(function () { $("cfgSave").disabled = false; toast("Save failed"); });
+  }
+  $("cfgSave").onclick = function () {
+    var keys = Object.keys(cfgEdits);
+    if (!keys.length || !cfgData) return;
+    clearErrors();
+    var warns = [], list = keys.map(function (k) {
+      var f = cfgField(k);
+      if (f.warn) warns.push(f.warn);
+      return '<div class="diff"><b>' + esc(f.label) + '</b><span class="key">' + k + '</span><br><span class="old">' + esc(shown(f.value)) + '</span> &rarr; <span class="new">' + esc(shown(String(cfgEdits[k]).trim())) + "</span></div>";
+    }).join("");
+    confirmBox({
+      title: "Save " + keys.length + " change" + (keys.length === 1 ? "" : "s") + "?",
+      html: "<p>These settings are saved and used by the worker within about " + cfgData.apply_s + " seconds:</p>" + list +
+        (warns.length ? '<div class="mig-warn" style="margin:12px 0 0"><ul>' + warns.map(function (w) { return "<li>" + esc(w) + "</li>"; }).join("") + "</ul></div>" : ""),
+      yes: "Save changes"
+    }).then(function (ok) {
+      if (!ok) return;
+      var set = {};
+      keys.forEach(function (k) { set[k] = String(cfgEdits[k]).trim(); });
+      saveConfig({ set: set });
+    });
+  };
+  $("cfgDiscard").onclick = function () { cfgEdits = {}; clearErrors(); renderConfig(); };
+  $("cfgForm").addEventListener("click", function (e) {
+    var b = e.target.closest ? e.target.closest("[data-reset]") : null;
+    if (!b || !cfgData) return;
+    var k = b.getAttribute("data-reset"), f = cfgField(k);
+    confirmBox({
+      title: "Reset " + f.label + "?",
+      html: '<p>Back to the wrangler.toml value.</p><div class="diff"><b>' + esc(f.label) + '</b><span class="key">' + k + '</span><br><span class="old">' + esc(shown(f.value)) + '</span> &rarr; <span class="new">' + esc(shown(f.base)) + "</span></div>",
+      yes: "Reset"
+    }).then(function (ok) { if (ok) saveConfig({ reset: [k] }); });
+  });
+  $("cfgResetAll").onclick = function () {
+    if (!cfgData) return;
+    var edited = cfgData.fields.filter(function (f) { return f.edited; });
+    if (!edited.length) return;
+    confirmBox({
+      title: "Reset all " + edited.length + " edited setting" + (edited.length === 1 ? "" : "s") + "?",
+      html: "<p>Everything goes back to the values in wrangler.toml:</p>" + edited.map(function (f) {
+        return '<div class="diff"><b>' + esc(f.label) + '</b><span class="key">' + f.key + '</span><br><span class="old">' + esc(shown(f.value)) + '</span> &rarr; <span class="new">' + esc(shown(f.base)) + "</span></div>";
+      }).join(""),
+      yes: "Reset all", danger: true
+    }).then(function (ok) { if (ok) saveConfig({ all: true }); });
+  };
+  loadConfig();
 
   go(location.hash.slice(1) || "overview", false);
 })();

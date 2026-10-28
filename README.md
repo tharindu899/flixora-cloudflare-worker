@@ -75,6 +75,8 @@ curl -s -D- -o /dev/null -H "Range: bytes=0-1048575" "$URL" | grep -i "x-flx-cac
 | `PREFETCH_NEXT` | true | ඊළඟ chunk එක කලින් lookup |
 | `BACKEND_USES_TURNSTILE` | true | backend Turnstile off නම් false |
 | `ORIGIN_URL` | - | optional short mode (`https://proxy/dl/<id>/<name>`) |
+| `CF_REQ_LIMIT` | 100000 | Worker requests per day for the Limits meter (Free plan = 100000) |
+| `CF_WARN_PCT` | 80 | Telegram alert at this % of a Cloudflare Free daily limit (0 = off) |
 
 ## දැනගන්න ඕන limits (honest notes)
 
@@ -114,6 +116,33 @@ CSP එකේ ඒ hosts දෙක විතරක් allow කරලා ති�
 - **Per-client limits**: `MAX_CLIENT_REQS` (parallel connections, default 24) and `MAX_CLIENT_FILES` (different files at once, default 6). Over the limit -> 429 with `Retry-After: 5`, nothing is fetched from the VPS,
   and the Stats page counts it under "Limited". Set `0` to turn a limit off. Note: on mobile networks (CGNAT) many people share one IP, so do not set these too low.
 - **Light / dark** toggle in the sidebar (remembered in the browser).
+
+## Cloudflare Free plan limits (UI -> Limits)
+
+Worker එක Cloudflare **Free plan** එකේ limits වලට කිට්ටු වෙනවද කියලා UI එකේ **Limits** පිටුවෙන් බලන්න පුළුවන්:
+
+- **Cards**: Worker requests today (`/ 100,000`), Durable Object requests (`/ 100,000`), DO rows written (estimate, `/ 100,000`), limit reset වෙන්න තියෙන වෙලාව.
+  Overview පිටුවෙත් "CF requests today" card එකක් තියෙනවා.
+- **Table**: Free plan limits (requests/day, 1,000 requests/min burst, 10 ms CPU, 50 subrequests, 128 MB memory, 3 MB worker size, DO limits) සහ මේ Worker එක ඒවාට කොච්චර use කරනවද.
+- **Telegram alert**: ඕනෑම daily limit එකක් `CF_WARN_PCT` (default 80%) වුණාම, ආයෙත් 95% සහ 100% වුණාම, දවසකට එක පාරක් බැගින්. Cron check එකෙන් (5 min) යවනවා.
+- Daily limits **00:00 UTC** වලට reset වෙනවා (Sri Lanka 05:30). Stats වල day boundary (`STATS_TZ_MIN`) වෙනස් වුණත් මේක හැමවිටම UTC.
+- Requests ගණන් කරන්නේ Worker එක තනියම (හැම request එකක්ම, UI poll වලත් එක්ක; 5-min cron check එක නැතුව). ඒ නිසා Cloudflare dashboard එකේ අගයට වඩා පොඩ්ඩක් වෙනස් වෙන්න පුළුවන්.
+  DO "rows written" එක estimate එකක් (Durable Object storage `put` එකක් = row එකක්). Memory mode (LOGS නැතුව) එකේ ගණන් per-instance, restart වුණාම reset.
+- `CF_REQ_LIMIT` සහ `CF_WARN_PCT` Config පිටුවෙන් වෙනස් කරන්න පුළුවන්. ඒවා meter එකටයි alert එකටයි විතරයි, Cloudflare ගේ real limit එක වෙනස් වෙන්නේ නෑ.
+
+## Config page (settings UI එකෙන්ම edit කරන්න)
+
+UI -> **Config**. `wrangler.toml` එක edit කරලා redeploy නොකර settings වෙනස් කරන්න පුළුවන්:
+
+- Groups: Edge cache, Backend, Protection, Alerts, Cloudflare limits, Stats. හැම field එකකම hint එකක්, `wrangler.toml` / default අගය, "edited" tag එකක් තියෙනවා.
+- **Confirm**: "Review & save" ඔබපුවාම dialog එකක් එනවා (පරණ -> අලුත් අගය, අවදානම් warnings). **Confirm** කරන තුරු කිසිම දෙයක් save වෙන්නේ නෑ. Reset (එක field එකක් හෝ සියල්ල) වලටත් confirm dialog එකක් තියෙනවා.
+  Server එකත් `confirm: true` නැති `POST /config` request reject කරනවා.
+- Validation Worker එකේ: range check, `ALLOWED_ORIGINS` හිස් කරන්න බෑ, country code 2 අකුරු, ආදිය. වැරදි තියෙනවා නම් field එක යටින් error එක පෙන්නලා කිසිම දෙයක් save කරන්නේ නෑ.
+- Save කරපු අගයන් **LOGS Durable Object** එකේ තියෙනවා, `wrangler.toml` අගයට වඩා ප්‍රමුඛයි. ඔයා toml අගයටම ආයෙ දැම්මොත් override එක අයින් වෙනවා.
+  Worker instance එකක් වෙනස් කිරීම තත්පර ~15 ක් ඇතුළත ගන්නවා (save කරපු instance එක ඉක්මනටම).
+- **Durable Object bind කරලා නැත්නම්** (memory mode) Config page එක read-only (storage නැති නිසා).
+- Secrets (`UI_USER`, `UI_PASS`, `TURNSTILE_SECRET`, `TG_*`) UI එකෙන් edit කරන්න බෑ.
+- වෙනස්කම් Telegram එකටත් යනවා (`TG_BOT_TOKEN` තියෙනවා නම්) සහ page එකේ "recent changes" වල අන්තිම 30 පෙන්නනවා.
 
 ## Live log
 

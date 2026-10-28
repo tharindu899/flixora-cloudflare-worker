@@ -40,6 +40,12 @@ ABUSE_GB_PER_HOUR = "30"
 # Per client limits, answered with 429 (0 = no limit). Many mobile users can share one IP (CGNAT), so keep these generous.
 MAX_CLIENT_REQS = "24"
 MAX_CLIENT_FILES = "6"
+# Cloudflare Free plan usage meter (UI -> Limits): Worker requests per day (Free = 100000, resets 00:00 UTC)
+# and the Telegram alert level: alert at this % of any daily Free limit, again at 95% (0 = off).
+CF_REQ_LIMIT = "100000"
+CF_WARN_PCT = "80"
+# Almost every setting in this block can also be edited in the UI (Config page). Edited values are saved in the
+# LOGS Durable Object and win over this file; "reset" in the UI goes back to the values written here.
 # Optional short mode: lets https://worker/dl/<id>/<name> map to this backend URL.
 # ORIGIN_URL = "https://api.example.com"
 
