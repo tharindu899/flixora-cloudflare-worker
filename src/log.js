@@ -244,6 +244,7 @@ export function addDenied(days, now, offsetMin = 330) {
 // ---------------------------------------------------------------- per-client limits + heavy users
 
 const FRESH_LIVE = 8 * 60 * 1000; // a request that has been silent this long is treated as dead
+const FRESH_SELF = 60 * 1000; // same viewer + same file: a silent request is treated as dead after 1 min
 export const memUsage = {};
 
 /** Live requests / distinct files of one client (client = the 6 hex chars at the end of the session id). */
@@ -253,7 +254,11 @@ export function clientActivity(entries, client, now, sid) {
   let sidActive = false;
   for (const e of entries) {
     if (e.client !== client) continue;
-    const live = Object.values(e.live).filter((l) => now - (l.t || e.upd) < FRESH_LIVE).length;
+    // The file being (re)requested right now: only recent requests count. A player that was cut off
+    // (network switch, stall) can leave "live" entries whose end event never arrived; they must not
+    // lock the same viewer out of the same file for the whole FRESH_LIVE window (the "wait 5-10 min" stall).
+    const fresh = e.sid === sid ? FRESH_SELF : FRESH_LIVE;
+    const live = Object.values(e.live).filter((l) => now - (l.t || e.upd) < fresh).length;
     if (!live) continue;
     reqs += live;
     files++;

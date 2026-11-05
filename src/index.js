@@ -23,7 +23,8 @@ export { LogHub } from "./log.js";
 
 const MIB = 1024 * 1024;
 const SUBTITLE_EXT = new Set([".srt", ".vtt", ".ass", ".ssa", ".sub"]);
-const RETRY_STATUS = new Set([429, 502, 503, 504]);
+// 520-524 are Cloudflare's own "origin broke the connection / timed out" codes; they are usually transient, so retry them too.
+const RETRY_STATUS = new Set([429, 502, 503, 504, 520, 521, 522, 523, 524]);
 const SUBREQUEST_BUDGET = 44; // Free plan hard limit is 50; keep headroom
 const MIN_BUDGET_FOR_CACHED_CHUNK = 4; // match + fetch + put (+1 spare)
 const LOG_RESERVE = 10; // subrequests kept for the Durable Object activity log (only when LOGS is bound)
