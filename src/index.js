@@ -31,8 +31,6 @@ const LOG_RESERVE = 10; // subrequests kept for the Durable Object activity log 
 
 // chunk key -> promise of the cache.put that is storing it (same isolate only)
 const pending = new Map();
-// consecutive times the Cache API did not honour a Range match (then we stop trying and slice in JS)
-const nativeRange = { fails: 0, t: 0 };
 
 class HttpError extends Error {
   constructor(status, message) {
@@ -421,38 +419,11 @@ async function serve(request, ctx, c, parsed, reqUrl, env, client) {
     return meta;
   }
 
-  /**
-   * Cached chunk, only bytes skip..skip+take-1, cut by the Cache API itself (native, no JS per byte).
-   * Slicing a cached body in JS costs CPU on every read; an unaligned range skips up to a whole chunk and
-   * blows the Free plan's 10 ms CPU limit (outcome "exceededCpu" -> 503 -> player rebuilds from the start).
-   * Returns null when the cache does not answer the Range properly; the caller then falls back to sliceStream.
-   */
-  async function matchNative(key, skip, take) {
-    if ((nativeRange.fails >= 3 && Date.now() - nativeRange.t < 300000) || budget.left < 1) return null; // after 3 misses retry only every 5 min
-    budget.left--;
-    try {
-      const r = await cache.match(new Request(key, { headers: { Range: `bytes=${skip}-${skip + take - 1}` } }));
-      if (r && r.status === 206 && r.body) {
-        const cr = /bytes (\d+)-(\d+)\//i.exec(r.headers.get("content-range") || "");
-        if (cr && Number(cr[1]) === skip && Number(cr[2]) - Number(cr[1]) + 1 === take) {
-          nativeRange.fails = 0;
-          return r.body;
-        }
-      }
-      if (r) cancelBody(r);
-    } catch (_) {
-      /* fall back */
-    }
-    nativeRange.fails++;
-    nativeRange.t = Date.now();
-    return null;
-  }
-
   async function openChunk(idx) {
     const key = chunkKey(idx);
     if (c.cacheOn) {
       const inflight = pending.get(key);
-      if (inflight) await Promise.race([inflight, sleep(4000)]); // another request is already pulling it (short: the player gives up on slow reads)
+      if (inflight) await Promise.race([inflight, sleep(15000)]); // another viewer is already pulling it
       if (budget.left >= 1) {
         budget.left--;
         let hit = null;
@@ -465,7 +436,7 @@ async function serve(request, ctx, c, parsed, reqUrl, env, client) {
           const len = Number(hit.headers.get("x-flx-len"));
           const meta = metaFromHeaders(hit.headers);
           if (len > 0 && meta) {
-            return { hit: true, len, meta, getBody: () => hit.body, cancel: () => cancelBody(hit), native: (skip, take) => matchNative(key, skip, take) };
+            return { hit: true, len, meta, getBody: () => hit.body, cancel: () => cancelBody(hit) };
           }
           cancelBody(hit);
         }
@@ -676,15 +647,8 @@ async function serve(request, ctx, c, parsed, reqUrl, env, client) {
           nextP = openChunk(idx + 1).catch((error) => ({ error }));
         }
 
-        let body = null;
-        if ((skip > 0 || take < src.len) && src.native) {
-          body = await src.native(skip, take);
-          if (body) src.cancel();
-        }
-        if (!body) {
-          body = src.getBody();
-          if (skip > 0 || take < src.len) body = sliceStream(body, skip, take);
-        }
+        let body = src.getBody();
+        if (skip > 0 || take < src.len) body = sliceStream(body, skip, take);
         await body.pipeTo(writable, { preventClose: true });
         pos += take;
         idx++;
@@ -1122,4 +1086,4 @@ export default {
   },
 };
 
-export { parseRangeSpec, resolveRange, verifyDownloadToken, nativeRange };
+export { parseRangeSpec, resolveRange, verifyDownloadToken };
