@@ -267,9 +267,28 @@ export function clientActivity(entries, client, now, sid) {
   return { reqs, files, sidActive };
 }
 
+const kindOf = (sid) => String(sid).split("|")[1] || "";
+function ownLive(entries, client, now, sid) {
+  let n = 0;
+  for (const e of entries) {
+    if (e.client !== client || e.sid !== sid) continue;
+    n += Object.values(e.live).filter((l) => now - (l.t || e.upd) < FRESH_SELF).length;
+  }
+  return n;
+}
+
 /** -> { ok } or { ok:false, reason } */
 export function gateDecision(entries, { client, sid, maxReqs, maxFiles }, now) {
   const a = clientActivity(entries, client, now, sid);
+  // Playing: the viewer's own parallel Range requests for this file (stream + prefetch + seeks + ghosts of aborted
+  // requests) must not lock the player out. Only other files / downloads count; own requests have a high hard cap.
+  if (kindOf(sid) === "play") {
+    const own = ownLive(entries, client, now, sid);
+    if (maxReqs > 0 && a.reqs - own >= maxReqs) return { ok: false, reason: `Too many parallel connections (limit ${maxReqs})` };
+    if (own >= 64) return { ok: false, reason: "Too many parallel connections for one file" };
+    if (maxFiles > 0 && !a.sidActive && a.files >= maxFiles) return { ok: false, reason: `Too many files at once (limit ${maxFiles})` };
+    return { ok: true };
+  }
   if (maxReqs > 0 && a.reqs >= maxReqs) return { ok: false, reason: `Too many parallel connections (limit ${maxReqs})` };
   if (maxFiles > 0 && !a.sidActive && a.files >= maxFiles) return { ok: false, reason: `Too many files at once (limit ${maxFiles})` };
   return { ok: true };

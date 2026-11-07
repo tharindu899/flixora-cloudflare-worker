@@ -48,7 +48,14 @@ globalThis.caches = {
     async match(key) {
       const k = typeof key === "string" ? key : key.url;
       const e = store.get(k);
-      return e ? new Response(e.buf.slice(0), { status: 200, headers: e.headers }) : undefined;
+      if (!e) return undefined;
+      const rg = globalThis.__cacheRange && typeof key !== "string" ? /bytes=(\d+)-(\d+)/.exec(key.headers.get("range") || "") : null;
+      if (rg) {
+        const a = Number(rg[1]), b = Math.min(Number(rg[2]), e.buf.length - 1);
+        globalThis.__nativeHits = (globalThis.__nativeHits || 0) + 1;
+        return new Response(e.buf.slice(a, b + 1), { status: 206, headers: { "Content-Range": `bytes ${a}-${b}/${e.buf.length}`, "X-Flx-Len": "0" } });
+      }
+      return new Response(e.buf.slice(0), { status: 200, headers: e.headers });
     },
     async put(key, resp) {
       const k = typeof key === "string" ? key : key.url;
@@ -60,7 +67,7 @@ globalThis.caches = {
   },
 };
 
-const { default: worker } = await import("../src/index.js");
+const { default: worker, nativeRange } = await import("../src/index.js");
 
 const ENV = { ALLOWED_ORIGINS: HOST, CHUNK_MB: "1", MAX_CHUNKS: "3", ENABLE_CACHE: "true", TURNSTILE_SECRET: SECRET };
 
@@ -816,4 +823,28 @@ test("Overview shows the Recent errors table", async () => {
   const { UI_HTML } = await import("../src/ui.js");
   assert.ok(UI_HTML.includes('id="errCard"') && UI_HTML.includes("/errors.json"));
   assert.ok(UI_HTML.includes('id="errCopy"'), "copy button for the error log");
+});
+
+test("unaligned range on cached chunks is cut by the cache natively (no JS skipping) and stays exact", async () => {
+  resetAll();
+  const a = MIB + 777, b = 3 * MIB + 4321;
+  await call(plain(), { headers: { Range: `bytes=0-${5 * MIB}` } }); // warm every chunk
+  nativeRange.fails = 0;
+  globalThis.__cacheRange = true;
+  globalThis.__nativeHits = 0;
+  const before = originCalls.length;
+  const { res, body } = await call(plain(), { headers: { Range: `bytes=${a}-${b}` } });
+  globalThis.__cacheRange = false;
+  assert.equal(res.status, 206);
+  assert.deepEqual(body, expected(a, b));
+  assert.ok(globalThis.__nativeHits >= 2, "edge chunks should use the native range");
+  assert.equal(originCalls.length, before, "no origin calls");
+});
+
+test("cache that ignores Range falls back to JS slicing and stays exact", async () => {
+  resetAll();
+  const a = MIB + 5, b = 2 * MIB + 99;
+  await call(plain(), { headers: { Range: `bytes=0-${5 * MIB}` } });
+  const { body } = await call(plain(), { headers: { Range: `bytes=${a}-${b}` } });
+  assert.deepEqual(body, expected(a, b));
 });
